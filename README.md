@@ -20,7 +20,7 @@ In a second terminal in the same directory:
 npm run dev -- --strictPort
 ```
 
-The web app runs on port 5174; Vite proxies `/api` to the loopback API on port 3001. This standalone app has no dependency on Trace or Mosaic. For a production build, run `npm run build`; production hosting must route `/api` to the Node server. Static hosting alone cannot run AI. No public deployment was performed.
+The web app runs on port 5174; Vite proxies `/api` to the loopback API on port 3001. This standalone app has no dependency on Trace or Mosaic. For a production build, run `npm run build`; other production hosting must route `/api` to the Node server; Netlify uses the included function. Static hosting alone cannot run AI. No public deployment was performed.
 
 ## AI configuration
 
@@ -54,4 +54,4 @@ Browser tests use `/usr/bin/chromium`; adjust the test runner's executable path 
 
 ## Netlify frontend setup
 
-Connect this repository, leave the base directory blank, use `npm run build`, and publish `dist`. Set Node.js to 24. The included configuration supplies these defaults. The current AI backend is a Node server, not a Netlify Function: a static Netlify deployment supports manual logging but does not host the AI endpoint. Host the API separately with `/api` routing, or adapt it to a Netlify Function before enabling live AI. Do not add credentials to build-time frontend variables.
+Connect this repository, leave the base directory blank, use `npm run build`, and publish `dist`. Set Node.js to 24. The included configuration supplies these defaults. The AI endpoint runs as the included Netlify Function (`netlify/functions/api.mjs`), sharing the same handler as the local Node server. `/api/*` routes to this function before the SPA fallback. In Netlify environment settings, add `NUDGE_API_KEY` and `NUDGE_MODEL` for the Functions runtime, then redeploy. Choose a current model available to your OpenAI account with Structured Outputs support. These variables stay on the server; API billing/access must also be enabled. Without them, the function returns a readable setup message and manual logging stays available. Do not add credentials to build-time frontend variables.

@@ -1,3 +1,4 @@
+import { readApiJson } from "./api";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
@@ -170,7 +171,12 @@ function ProfileForm({
               min="100"
               max="250"
               value={p.height}
-              onChange={(e) => set("height", Number(e.target.value))}
+              onChange={(e) =>
+                set(
+                  "height",
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
             />
           </label>
           <label>
@@ -182,7 +188,12 @@ function ProfileForm({
               min="25"
               max="350"
               value={p.weight}
-              onChange={(e) => set("weight", Number(e.target.value))}
+              onChange={(e) =>
+                set(
+                  "weight",
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
             />
           </label>
         </div>
@@ -276,9 +287,10 @@ function ProfileForm({
         {mode === "estimate" && (
           <div className="estimate">
             <p>
-              Mifflin–St Jeor estimates adult resting energy from weight,
-              height, age and the sex coefficient used in the original study.
-              Activity multipliers are rough assumptions, not measurements.
+              This adult calorie estimate uses your weight, height, age and sex.
+              The original study uses different adjustments for females and
+              males. You can enter your own budget instead. Activity levels are
+              rough estimates, not measurements.
             </p>
             <div className="two">
               <label>
@@ -292,11 +304,11 @@ function ProfileForm({
                 />
               </label>
               <label>
-                Sex used in equation
+                Sex for calorie estimate
                 <select value={sex} onChange={(e) => setSex(e.target.value)}>
                   <option value="">Choose</option>
-                  <option value="female">Female coefficient</option>
-                  <option value="male">Male coefficient</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
                 </select>
               </label>
             </div>
@@ -513,8 +525,12 @@ export default function App() {
   const ask = async (message: string) => {
     if (lock.current || !p || !message.trim()) return;
     if (/^i (?:don['’]t|do not) care today[.!]?$/i.test(message.trim())) {
-      setState(s => ({...s, paused: dateKey(), chat: [...s.chat, {id: uid(), role: 'user', text: message}]}));
-      setText('');
+      setState((s) => ({
+        ...s,
+        paused: dateKey(),
+        chat: [...s.chat, { id: uid(), role: "user", text: message }],
+      }));
+      setText("");
       return;
     }
     const epoch = requestEpoch.current;
@@ -550,7 +566,7 @@ export default function App() {
         }),
         signal: AbortSignal.timeout(65000),
       });
-      const raw = await response.json();
+      const raw = await readApiJson(response);
       if (epoch !== requestEpoch.current) return;
       if (!response.ok) throw Error(raw.error || "AI is unavailable.");
       const result = validateResponse(raw, p);

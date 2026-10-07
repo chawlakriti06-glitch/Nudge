@@ -78,7 +78,7 @@ test("adult estimate path shows assumptions and needs acceptance", async ({
   await page.getByRole("button", { name: "Set up my menu first" }).click();
   await page.getByRole("button", { name: "Help me estimate" }).click();
   await page.getByLabel("Age", { exact: true }).fill("30");
-  await page.getByLabel("Sex used in equation").selectOption("female");
+  await page.getByLabel("Sex for calorie estimate").selectOption("female");
   await page.getByRole("button", { name: "Calculate estimate" }).click();
   await expect(
     page.getByText("Estimated maintenance: 2,077 kcal/day"),
@@ -286,11 +286,62 @@ test("different days, steps and undo recalculate independently", async ({
   await page.getByLabel("Ledger date").fill("2026-01-01");
   await expect(page.getByText("Nothing logged for this day.")).toBeVisible();
 });
-test('explicit pause phrase is a local control, not a fake AI reply', async ({page}) => {
- await seed(page);
- await page.getByLabel('Message',{exact:true}).fill('I don’t care today');
- await page.getByRole('button',{name:'Send message'}).click();
- await expect(page.getByText('Suggestions paused today.',{exact:false})).toBeVisible();
- await expect(page.locator('.bubble.user')).toContainText('I don’t care today');
- await expect(page.getByText('1,800 kcal remaining')).toBeVisible();
+test("explicit pause phrase is a local control, not a fake AI reply", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.getByLabel("Message", { exact: true }).fill("I don’t care today");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(
+    page.getByText("Suggestions paused today.", { exact: false }),
+  ).toBeVisible();
+  await expect(page.locator(".bubble.user")).toContainText(
+    "I don’t care today",
+  );
+  await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
+});
+
+test("measurements can be cleared and retyped without forced zero", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Let’s get started" }).click();
+  await page.getByRole("button", { name: "Set up my menu first" }).click();
+  for (const [label, value] of [
+    ["Height (cm)", "170"],
+    ["Weight (kg)", "65.5"],
+  ]) {
+    const input = page.getByLabel(label, { exact: true });
+    await input.fill("");
+    await expect(input).toHaveValue("");
+    await input.fill("0");
+    await input.press("Backspace");
+    await expect(input).toHaveValue("");
+    await input.fill(value);
+    await expect(input).toHaveValue(value);
+  }
+  await page.getByRole("button", { name: "Help me estimate" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "Sex for calorie estimate" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: "Female", exact: true }),
+  ).toHaveCount(1);
+});
+test("deployed HTML API fallback explains setup and preserves saved intake", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({
+      contentType: "text/html",
+      body: "<!DOCTYPE html><html>SPA fallback</html>",
+    }),
+  );
+  await page.getByLabel("Message", { exact: true }).fill("I want 2 samosas");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "AI endpoint is unavailable",
+  );
+  await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
 });

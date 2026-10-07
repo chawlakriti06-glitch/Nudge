@@ -28,11 +28,11 @@ test("malformed JSON produces readable error", async () => {
 });
 test("Netlify function routing returns JSON status and missing-key response", async () => {
   const saved = {
-    key: process.env.NUDGE_API_KEY,
-    model: process.env.NUDGE_MODEL,
+    key: process.env.NUDGE_GEMINI_API_KEY,
+    model: process.env.NUDGE_GEMINI_MODEL,
   };
-  delete process.env.NUDGE_API_KEY;
-  delete process.env.NUDGE_MODEL;
+  delete process.env.NUDGE_GEMINI_API_KEY;
+  delete process.env.NUDGE_GEMINI_MODEL;
   try {
     const status = await handler(
       new Request("https://nudge.example/.netlify/functions/api/status"),
@@ -40,11 +40,11 @@ test("Netlify function routing returns JSON status and missing-key response", as
     expect(await status.json()).toEqual({ configured: false });
     const r = await handler(request());
     expect(r.status).toBe(503);
-    expect((await r.json()).error).toContain("NUDGE_API_KEY");
+    expect((await r.json()).error).toContain("NUDGE_GEMINI_API_KEY");
   } finally {
     for (const [k, v] of [
-      ["NUDGE_API_KEY", saved.key],
-      ["NUDGE_MODEL", saved.model],
+      ["NUDGE_GEMINI_API_KEY", saved.key],
+      ["NUDGE_GEMINI_MODEL", saved.model],
     ])
       if (v === undefined) delete process.env[k!];
       else process.env[k!] = v;
@@ -52,31 +52,33 @@ test("Netlify function routing returns JSON status and missing-key response", as
 });
 test("provider call stays server-side and uses configurable model, mocked transport only", async () => {
   const env = {
-    NUDGE_API_KEY: "test-only-placeholder",
-    NUDGE_MODEL: "test-model",
+    NUDGE_GEMINI_API_KEY: "test-only-placeholder",
+    NUDGE_GEMINI_MODEL: "gemini-test-model",
   };
   const r = await handleApi(request(), env, async (url: string, opts: any) => {
-    expect(url).toBe("https://api.openai.com/v1/responses");
-    expect(opts.headers.Authorization).toBe("Bearer test-only-placeholder");
+    expect(url).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-test-model:generateContent",
+    );
+    expect(opts.headers["x-goog-api-key"]).toBe("test-only-placeholder");
     expect(JSON.parse(opts.body)).toMatchObject({
-      model: "test-model",
-      store: false,
+      generationConfig: { responseMimeType: "application/json" },
     });
     return new Response(
       JSON.stringify({
-        output: [
+        candidates: [
           {
-            content: [
-              {
-                type: "output_text",
-                text: JSON.stringify({
-                  message: "Test fixture",
-                  kind: "message",
-                  foods: [],
-                  days: [],
-                }),
-              },
-            ],
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    message: "Test fixture",
+                    kind: "message",
+                    foods: [],
+                    days: [],
+                  }),
+                },
+              ],
+            },
           },
         ],
       }),
@@ -86,7 +88,10 @@ test("provider call stays server-side and uses configurable model, mocked transp
   expect((await r.json()).message).toBe("Test fixture");
 });
 test("invalid requests and provider failures return JSON without applying output", async () => {
-  const env = { NUDGE_API_KEY: "test", NUDGE_MODEL: "test" };
+  const env = {
+    NUDGE_GEMINI_API_KEY: "test",
+    NUDGE_GEMINI_MODEL: "gemini-test",
+  };
   expect((await handleApi(request(null), env)).status).toBe(400);
   expect(
     (
@@ -97,4 +102,48 @@ test("invalid requests and provider failures return JSON without applying output
       )
     ).status,
   ).toBe(502);
+});
+test("Gemini free-tier 429 has helpful copy and makes no paid fallback request", async () => {
+  let calls = 0;
+  const r = await handleApi(
+    request(),
+    { NUDGE_GEMINI_API_KEY: "test-only" },
+    async () => {
+      calls++;
+      return new Response("", { status: 429 });
+    },
+  );
+  expect(calls).toBe(1);
+  expect((await r.json()).error).toContain("No paid fallback");
+});
+test("an old OpenAI key alone cannot enable or be sent to Gemini", async () => {
+  let called = false;
+  const r = await handleApi(
+    request(),
+    { NUDGE_API_KEY: "old-test-only", NUDGE_MODEL: "openai-test" },
+    async () => {
+      called = true;
+    },
+  );
+  expect(r.status).toBe(503);
+  expect(called).toBe(false);
+});
+test("truncated Gemini output is rejected without a partial proposal", async () => {
+  const r = await handleApi(
+    request(),
+    { NUDGE_GEMINI_API_KEY: "test-only" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              finishReason: "MAX_TOKENS",
+              content: { parts: [{ text: '{"message":' }] },
+            },
+          ],
+        }),
+      ),
+  );
+  expect(r.status).toBe(502);
+  expect((await r.json()).error).toContain("could not finish");
 });

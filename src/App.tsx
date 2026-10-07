@@ -1622,13 +1622,15 @@ export default function App() {
                 <p>
                   AI is online: your message, dietary preferences, budget,
                   current plan and the last few messages are sent through our
-                  server to the AI provider. Height, weight and your name are
+                  server to Google Gemini. Height, weight and your name are
                   omitted from chat context.
                 </p>
                 <p>
                   Our server does not persist these payloads or log them
-                  routinely. Provider processing follows its API terms. Data is
-                  not encrypted by this app; avoid shared browsers.
+                  routinely. Google processes it under its API terms. Free-tier
+                  content may be used to improve Google products; avoid sharing
+                  sensitive details. Data is not encrypted by this app; avoid
+                  shared browsers.
                 </p>
                 <small>
                   Voice dictation may use your browser provider’s speech

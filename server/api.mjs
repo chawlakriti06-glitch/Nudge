@@ -50,13 +50,13 @@ export async function handleApi(
     "/api",
   );
   if (path === "/api/status" && request.method === "GET")
-    return json(200, { configured: !!env.NUDGE_API_KEY && !!env.NUDGE_MODEL });
+    return json(200, { configured: !!env.NUDGE_GEMINI_API_KEY });
   if (path !== "/api/chat" || request.method !== "POST")
     return json(404, { error: "Not found" });
-  if (!env.NUDGE_API_KEY || !env.NUDGE_MODEL)
+  if (!env.NUDGE_GEMINI_API_KEY)
     return json(503, {
       error:
-        "AI is not configured yet. Add NUDGE_API_KEY and NUDGE_MODEL to the Netlify server environment, then redeploy. Manual logging still works.",
+        "AI is not configured yet. Add NUDGE_GEMINI_API_KEY to the Netlify server environment, then redeploy. Use a Google AI Studio free-tier project. Manual logging still works.",
     });
   let body;
   try {
@@ -76,43 +76,66 @@ export async function handleApi(
   )
     return json(400, { error: "Invalid request" });
   try {
+    const model = env.NUDGE_GEMINI_MODEL || "gemini-2.5-flash-lite";
+    if (!/^gemini-[a-z0-9.-]+$/i.test(model))
+      return json(503, {
+        error:
+          "Choose a valid Gemini model in NUDGE_GEMINI_MODEL. No paid fallback is used.",
+      });
     const upstream = await fetchProvider(
-      "https://api.openai.com/v1/responses",
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${env.NUDGE_API_KEY}`,
+          "x-goog-api-key": env.NUDGE_GEMINI_API_KEY,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: env.NUDGE_MODEL,
-          store: false,
-          instructions,
-          input: JSON.stringify({
-            request: body.message,
-            context: body.context,
-          }),
-          text: {
-            format: {
-              type: "json_schema",
-              name: "nudge_response",
-              strict: true,
-              schema,
+          systemInstruction: { parts: [{ text: instructions }] },
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: JSON.stringify({
+                    request: body.message,
+                    context: body.context,
+                  }),
+                },
+              ],
             },
+          ],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseJsonSchema: schema,
+            maxOutputTokens: 12000,
           },
         }),
         signal: AbortSignal.timeout(55000),
       },
     );
-    if (!upstream.ok)
+    if (!upstream.ok) {
+      const errors = {
+        429: "Gemini's free-tier limit is reached. Wait and retry later, or check the project's free-tier quota in Google AI Studio. No paid fallback was attempted.",
+        400: "Gemini rejected the request. Check that the chosen model supports structured JSON responses.",
+        401: "Gemini could not authenticate. Check NUDGE_GEMINI_API_KEY in Netlify.",
+        403: "Gemini access was denied. Check the Google AI Studio key, project permissions and availability in your region.",
+        404: "The selected Gemini model is unavailable. Set NUDGE_GEMINI_MODEL to a currently available free-tier model in Google AI Studio.",
+      };
       return json(502, {
-        error: `AI provider could not complete this request (${upstream.status}). Check the server key, model access and API billing. Your saved data is unchanged.`,
+        error: `${errors[upstream.status] || `Gemini could not complete this request (${upstream.status}). Please retry later.`} Your saved data is unchanged. Manual logging still works.`,
       });
+    }
     const result = await upstream.json();
-    const text = result.output
-      ?.flatMap((o) => o.content || [])
-      .filter((c) => c.type === "output_text")
-      .map((c) => c.text)
+    const candidate = result.candidates?.[0];
+    if (candidate?.finishReason && candidate.finishReason !== "STOP")
+      return json(502, {
+        error:
+          "Gemini could not finish a usable response. Try a shorter request. Your saved data is unchanged.",
+      });
+    const text = candidate?.content?.parts
+      ?.filter((p) => !p.thought && typeof p.text === "string")
+      .map((p) => p.text)
       .join("");
     if (!text)
       return json(502, {

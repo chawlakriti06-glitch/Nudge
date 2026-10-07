@@ -37,7 +37,10 @@ test("Netlify function routing returns JSON status and missing-key response", as
     const status = await handler(
       new Request("https://nudge.example/.netlify/functions/api/status"),
     );
-    expect(await status.json()).toEqual({ configured: false });
+    expect(await status.json()).toEqual({
+      configured: false,
+      model: "gemini-2.5-flash-lite",
+    });
     const r = await handler(request());
     expect(r.status).toBe(503);
     expect((await r.json()).error).toContain("NUDGE_GEMINI_API_KEY");
@@ -146,4 +149,54 @@ test("truncated Gemini output is rejected without a partial proposal", async () 
   );
   expect(r.status).toBe(502);
   expect((await r.json()).error).toContain("could not finish");
+});
+
+test("diagnostics show exact model and list supported names without disclosing keys", async () => {
+  const env = {
+    NUDGE_GEMINI_API_KEY: "test-only-secret",
+    NUDGE_GEMINI_MODEL: " models/gemini-example ",
+  };
+  const r = await handleApi(
+    new Request("https://test/api/models"),
+    env,
+    async () =>
+      new Response(
+        JSON.stringify({
+          models: [
+            {
+              name: "models/gemini-example",
+              supportedGenerationMethods: ["generateContent"],
+            },
+            {
+              name: "models/embedding",
+              supportedGenerationMethods: ["embedContent"],
+            },
+          ],
+        }),
+      ),
+  );
+  const body = await r.json();
+  expect(body.model).toBe("gemini-example");
+  expect(body.availableModels).toEqual(["gemini-example"]);
+  expect(JSON.stringify(body)).not.toContain("test-only-secret");
+});
+test("404 diagnostics retain Google model reason but redact the key", async () => {
+  const r = await handleApi(
+    request(),
+    {
+      NUDGE_GEMINI_API_KEY: "test-secret",
+      NUDGE_GEMINI_MODEL: "gemini-example",
+    },
+    async () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "models/gemini-example not found. test-secret" },
+        }),
+        { status: 404 },
+      ),
+  );
+  const body = await r.json();
+  expect(body.error).toContain("gemini-example not found");
+  expect(body.error).not.toContain("test-secret");
+  expect(body.error).toContain("/api/models");
 });

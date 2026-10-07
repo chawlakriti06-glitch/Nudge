@@ -49,8 +49,44 @@ export async function handleApi(
     /^\/\.netlify\/functions\/api/,
     "/api",
   );
+  const model = (env.NUDGE_GEMINI_MODEL || "gemini-2.5-flash-lite")
+    .trim()
+    .replace(/^models\//, "");
   if (path === "/api/status" && request.method === "GET")
-    return json(200, { configured: !!env.NUDGE_GEMINI_API_KEY });
+    return json(200, { configured: !!env.NUDGE_GEMINI_API_KEY, model });
+  if (path === "/api/models" && request.method === "GET") {
+    if (!env.NUDGE_GEMINI_API_KEY)
+      return json(503, { error: "Gemini key is not configured." });
+    try {
+      const response = await fetchProvider(
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+        {
+          headers: { "x-goog-api-key": env.NUDGE_GEMINI_API_KEY },
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      if (!response.ok)
+        return json(502, {
+          error: `Google model listing failed (${response.status}). Check the Gemini key and project access.`,
+          model,
+        });
+      const data = await response.json();
+      return json(200, {
+        model,
+        availableModels: (data.models || [])
+          .filter((m) =>
+            m.supportedGenerationMethods?.includes("generateContent"),
+          )
+          .map((m) => m.name.replace(/^models\//, "")),
+        note: "Availability does not prove free-tier quota. Keep billing disabled and compare with AI Studio quotas.",
+      });
+    } catch {
+      return json(502, {
+        error: "Could not reach Google's model list. Retry later.",
+        model,
+      });
+    }
+  }
   if (path !== "/api/chat" || request.method !== "POST")
     return json(404, { error: "Not found" });
   if (!env.NUDGE_GEMINI_API_KEY)
@@ -76,7 +112,6 @@ export async function handleApi(
   )
     return json(400, { error: "Invalid request" });
   try {
-    const model = env.NUDGE_GEMINI_MODEL || "gemini-2.5-flash-lite";
     if (!/^gemini-[a-z0-9.-]+$/i.test(model))
       return json(503, {
         error:
@@ -122,8 +157,23 @@ export async function handleApi(
         403: "Gemini access was denied. Check the Google AI Studio key, project permissions and availability in your region.",
         404: "The selected Gemini model is unavailable. Set NUDGE_GEMINI_MODEL to a currently available free-tier model in Google AI Studio.",
       };
+      let detail = "";
+      if (upstream.status === 404) {
+        try {
+          const providerError = await upstream.json();
+          if (typeof providerError.error?.message === "string") {
+            detail = providerError.error.message
+              .replaceAll(env.NUDGE_GEMINI_API_KEY, "[redacted]")
+              .replaceAll(body.message, "[request]")
+              .replace(/AIza[A-Za-z0-9_-]+/g, "[redacted]")
+              .slice(0, 500);
+          }
+        } catch {
+          /* Preserve the status-based error if the body is not JSON. */
+        }
+      }
       return json(502, {
-        error: `${errors[upstream.status] || `Gemini could not complete this request (${upstream.status}). Please retry later.`} Your saved data is unchanged. Manual logging still works.`,
+        error: `${upstream.status === 404 ? `Gemini returned 404 for model "${model}". ${detail ? `Google says: ${detail} ` : ""}Check /api/models for the names available to this key.` : errors[upstream.status] || `Gemini could not complete this request (${upstream.status}). Please retry later.`} Your saved data is unchanged. Manual logging still works.`,
       });
     }
     const result = await upstream.json();

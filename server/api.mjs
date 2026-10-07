@@ -111,6 +111,25 @@ export async function handleApi(
     typeof body.context !== "object"
   )
     return json(400, { error: "Invalid request" });
+  const count = Number(body.context.profile?.meals);
+  if (![3, 4].includes(count))
+    return json(400, {
+      error:
+        "Set meals per day to 3 or 4 in your profile before requesting AI help.",
+    });
+  const mealSlots =
+    count === 4
+      ? ["Breakfast", "Lunch", "Snacks", "Dinner"]
+      : ["Breakfast", "Lunch", "Dinner"];
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const responseSchema = structuredClone(schema);
+  const daySchema = responseSchema.properties.days.items;
+  daySchema.properties.day.enum = weekDays;
+  daySchema.properties.meals.minItems = count;
+  daySchema.properties.meals.maxItems = count;
+  daySchema.properties.meals.items.properties.slot.enum = mealSlots;
+  responseSchema.properties.days.maxItems = 7;
+  const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. Actual consumed food does not replace a planned meal slot.`;
   try {
     if (!/^gemini-[a-z0-9.-]+$/i.test(model))
       return json(503, {
@@ -126,7 +145,9 @@ export async function handleApi(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: instructions }] },
+          systemInstruction: {
+            parts: [{ text: `${instructions}\n${menuRules}` }],
+          },
           contents: [
             {
               role: "user",
@@ -142,7 +163,7 @@ export async function handleApi(
           ],
           generationConfig: {
             responseMimeType: "application/json",
-            responseJsonSchema: schema,
+            responseJsonSchema: responseSchema,
             maxOutputTokens: 12000,
           },
         }),
@@ -202,6 +223,58 @@ export async function handleApi(
       return json(502, {
         error: "AI returned malformed output. Your saved data is unchanged.",
       });
+    if (parsed.kind === "plan") {
+      const aliases = {
+        monday: "Mon",
+        tuesday: "Tue",
+        wednesday: "Wed",
+        thursday: "Thu",
+        friday: "Fri",
+        saturday: "Sat",
+        sunday: "Sun",
+      };
+      for (const day of parsed.days) {
+        if (typeof day.day === "string")
+          day.day =
+            aliases[day.day.toLowerCase()] ||
+            weekDays.find((d) => d.toLowerCase() === day.day.toLowerCase()) ||
+            day.day;
+        if (!Array.isArray(day.meals) || day.meals.length !== count)
+          return json(502, {
+            error: `Gemini returned ${Array.isArray(day.meals) ? day.meals.length : 0} meals for ${day.day}, but your profile requires ${count}. Retry creating the full week. Your saved plan is unchanged.`,
+          });
+        for (const meal of day.meals)
+          if (typeof meal.slot === "string")
+            meal.slot =
+              mealSlots.find(
+                (slot) => slot.toLowerCase() === meal.slot.trim().toLowerCase(),
+              ) ||
+              (count === 4 && meal.slot.trim().toLowerCase() === "snack"
+                ? "Snacks"
+                : meal.slot);
+        if (
+          new Set(day.meals.map((m) => m.slot)).size !== count ||
+          !mealSlots.every((slot) => day.meals.some((m) => m.slot === slot))
+        )
+          return json(502, {
+            error: `Gemini omitted or duplicated a required meal slot for ${day.day}. Expected ${mealSlots.join(", ")}. Your saved plan is unchanged; retry the draft.`,
+          });
+        day.meals.sort(
+          (a, b) => mealSlots.indexOf(a.slot) - mealSlots.indexOf(b.slot),
+        );
+      }
+      if (
+        parsed.days.length !== 7 ||
+        !weekDays.every((day) => parsed.days.some((d) => d.day === day))
+      )
+        return json(502, {
+          error:
+            "Gemini did not return a complete seven-day menu. Your saved plan is unchanged; retry the draft.",
+        });
+      parsed.days.sort(
+        (a, b) => weekDays.indexOf(a.day) - weekDays.indexOf(b.day),
+      );
+    }
     return json(200, parsed);
   } catch {
     return json(502, {

@@ -5,7 +5,12 @@ import { readApiJson } from "../src/api";
 import handler from "../netlify/functions/api.mjs";
 // @ts-expect-error standalone JavaScript module
 import { handleApi } from "../server/api.mjs";
-const request = (body: unknown = { message: "Generate a menu", context: {} }) =>
+const request = (
+  body: unknown = {
+    message: "Generate a menu",
+    context: { profile: { meals: 3 } },
+  },
+) =>
   new Request("https://nudge.example/api/chat", {
     method: "POST",
     body: JSON.stringify(body),
@@ -199,4 +204,84 @@ test("404 diagnostics retain Google model reason but redact the key", async () =
   expect(body.error).toContain("gemini-example not found");
   expect(body.error).not.toContain("test-secret");
   expect(body.error).toContain("/api/models");
+});
+
+test.each([3, 4])(
+  "menu schema enforces %i slots and normalizes returned order",
+  async (count) => {
+    const slots =
+      count === 4
+        ? ["Breakfast", "Lunch", "Snacks", "Dinner"]
+        : ["Breakfast", "Lunch", "Dinner"];
+    const response = {
+      message: "Fixture",
+      kind: "plan",
+      foods: [],
+      days: [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+      ].map((day) => ({
+        day,
+        meals: slots
+          .map((slot) => ({
+            slot,
+            name: "Rice",
+            portion: "1 bowl",
+            ingredients: ["rice"],
+            calories: 300,
+            assumptions: "Fixture",
+          }))
+          .reverse(),
+      })),
+    };
+    const r = await handleApi(
+      request({ message: "Menu", context: { profile: { meals: count } } }),
+      { NUDGE_GEMINI_API_KEY: "test" },
+      async (_url: string, opts: any) => {
+        const payload = JSON.parse(opts.body);
+        const meals =
+          payload.generationConfig.responseJsonSchema.properties.days.items
+            .properties.meals;
+        expect(meals.minItems).toBe(count);
+        expect(meals.maxItems).toBe(count);
+        expect(meals.items.properties.slot.enum).toEqual(slots);
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { content: { parts: [{ text: JSON.stringify(response) }] } },
+            ],
+          }),
+        );
+      },
+    );
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.days[0].day).toBe("Mon");
+    expect(body.days[0].meals.map((m: any) => m.slot)).toEqual(slots);
+  },
+);
+test("incomplete menu is rejected rather than fabricated or saved", async () => {
+  const bad = {
+    message: "Fixture",
+    kind: "plan",
+    foods: [],
+    days: [{ day: "Mon", meals: [] }],
+  };
+  const r = await handleApi(
+    request(),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(bad) }] } }],
+        }),
+      ),
+  );
+  expect(r.status).toBe(502);
+  expect((await r.json()).error).toContain("profile requires 3");
 });

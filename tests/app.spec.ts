@@ -1,0 +1,296 @@
+import { test, expect, type Page } from "@playwright/test";
+const profile = {
+  name: "Kriti",
+  height: 165,
+  weight: 62,
+  activity: "Medium",
+  goal: "Maintain",
+  meals: 3,
+  preferences: "Vegetarian",
+  dislikes: "",
+  allergies: "peanut",
+  language: "English",
+  budget: 1800,
+  cycle: false,
+};
+const seed = async (page: Page) => {
+  await page.addInitScript((p) => {
+    if (!localStorage.getItem("nudge.local.v1"))
+      localStorage.setItem(
+        "nudge.local.v1",
+        JSON.stringify({
+          profile: p,
+          foods: [],
+          chat: [],
+          plan: [],
+          draft: [],
+          steps: {},
+          paused: "",
+          pending: "",
+        }),
+      );
+  }, profile);
+  await page.goto("/");
+};
+test("manual onboarding retains welcome food, confirms once, reloads, edits and deletes", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Let’s get started" }).click();
+  await page.getByLabel("Message", { exact: true }).fill("I ate 2 samosas");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "No known allergies — None" }).click();
+  await page.getByLabel("Daily calorie budget (kcal)").fill("1800");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    page.getByText("I ate 2 samosas", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Enter manually" }).click();
+  await page.getByLabel("Portion", { exact: true }).fill("2 medium samosas");
+  await page.getByLabel("Estimated calories", { exact: true }).fill("500");
+  await page.getByRole("button", { name: "Confirm & log" }).click();
+  await expect(
+    page.getByText("1,300 kcal remaining", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText("1,300 kcal remaining", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Estimated calories", { exact: true }).fill("450");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(
+    page.getByText("1,350 kcal remaining", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await expect(
+    page.getByText("1,800 kcal remaining", { exact: true }),
+  ).toBeVisible();
+});
+test("adult estimate path shows assumptions and needs acceptance", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Let’s get started" }).click();
+  await page.getByRole("button", { name: "Set up my menu first" }).click();
+  await page.getByRole("button", { name: "Help me estimate" }).click();
+  await page.getByLabel("Age", { exact: true }).fill("30");
+  await page.getByLabel("Sex used in equation").selectOption("female");
+  await page.getByRole("button", { name: "Calculate estimate" }).click();
+  await expect(
+    page.getByText("Estimated maintenance: 2,077 kcal/day"),
+  ).toBeVisible();
+  await expect(page.getByLabel("Daily calorie budget (kcal)")).toHaveValue("");
+  await page.getByRole("button", { name: "Use maintenance budget" }).click();
+  await expect(page.getByLabel("Daily calorie budget (kcal)")).toHaveValue(
+    "2077",
+  );
+});
+test("AI unavailable preserves data and intentions do not log", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({ status: 503, json: { error: "AI unavailable test" } }),
+  );
+  await page.getByLabel("Message", { exact: true }).fill("I want 2 samosas");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("alert")).toContainText("AI unavailable");
+  await expect(
+    page.getByText("1,800 kcal remaining", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".bubble.user")).toContainText("I want 2 samosas");
+  await page.reload();
+  await expect(page.locator(".bubble.user")).toContainText("I want 2 samosas");
+});
+test("pause allows logging, resume and delete clear only Nudge", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.evaluate(() =>
+    localStorage.setItem("trace.prototype.v1", "preserve"),
+  );
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await page.getByRole("switch", { name: "Pause suggestions today" }).click();
+  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await expect(
+    page.getByText("Suggestions paused today.", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("Toast");
+  await page.getByLabel("Portion", { exact: true }).fill("1 bread slice");
+  await page.getByLabel("Estimated calories", { exact: true }).fill("80");
+  await page.getByRole("button", { name: "Confirm & log" }).click();
+  await expect(page.getByText("1,720 kcal remaining")).toBeVisible();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(
+    page.getByText("Suggestions paused today.", { exact: false }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Delete my data", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete my data", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Let’s get started" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("trace.prototype.v1")),
+  ).toBe("preserve");
+});
+test("explicit AI fixture exercises menu approvals and allergy rejection, not a live provider", async ({
+  page,
+}) => {
+  await seed(page);
+  const menu = Array.from(
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    (day) => ({
+      day,
+      meals: ["Breakfast", "Lunch", "Dinner"].map((slot) => ({
+        slot,
+        name: "Rice and dal",
+        portion: "100 g cooked rice, 150 g cooked dal",
+        ingredients: ["rice", "lentils", "olive oil"],
+        calories: 500,
+        assumptions: "1 tsp oil included",
+      })),
+    }),
+  );
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({
+      json: { message: "Menu fixture", kind: "plan", foods: [], days: menu },
+    }),
+  );
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
+  await page.getByRole("button", { name: "Create my weekly draft" }).click();
+  await page.getByRole("button", { name: "Review draft", exact: true }).click();
+  await expect(page.locator(".meal")).toHaveCount(3);
+  await page.getByRole("button", { name: "Approve & save full week" }).click();
+  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await page.getByRole("button", { name: "Edit profile" }).click();
+  await page
+    .getByRole("combobox", { name: "Meals per day", exact: true })
+    .selectOption("4");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
+  const four = menu.map((d) => ({
+    ...d,
+    meals: [
+      ...d.meals.slice(0, 2),
+      { ...d.meals[0], slot: "Snacks" },
+      d.meals[2],
+    ],
+  }));
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({
+      json: { message: "4 slot fixture", kind: "plan", foods: [], days: four },
+    }),
+  );
+  await page.getByRole("button", { name: "Create revised draft" }).click();
+  await page.getByRole("button", { name: "Review draft", exact: true }).click();
+  await expect(page.locator(".meal")).toHaveCount(4);
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page.locator(".meal")).toHaveCount(3);
+  four[0].meals[0].ingredients = ["peanut"];
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({
+      json: { message: "unsafe fixture", kind: "plan", foods: [], days: four },
+    }),
+  );
+  await page.getByRole("button", { name: "Create revised draft" }).click();
+  await expect(page.getByRole("alert")).toContainText("Conflicts with peanut");
+});
+test("phone screens have no horizontal clipping or food photos", async ({
+  page,
+}) => {
+  await seed(page);
+  for (const tab of ["Chat", "Menu", "Profile"]) {
+    await page.getByRole("button", { name: tab, exact: true }).click();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await expect(page.locator("img")).toHaveCount(0);
+    await page.screenshot({
+      path: `/tmp/nudge-${tab.toLowerCase()}.png`,
+      fullPage: true,
+    });
+  }
+});
+test("confirmed AI preview is durable and applies once", async ({ page }) => {
+  await seed(page);
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({
+      json: {
+        message: "Preview test fixture",
+        kind: "log",
+        foods: [
+          {
+            name: "Samosas",
+            portion: "2 medium, fried",
+            calories: 500,
+            assumptions: "Fixture only; not live AI",
+          },
+        ],
+        days: [],
+      },
+    }),
+  );
+  await page.getByLabel("Message", { exact: true }).fill("I ate 2 samosas");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("Count this as eaten?")).toBeVisible();
+  await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Count this as eaten?")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await expect(page.getByText("1,300 kcal remaining")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Confirm & log", exact: true }),
+  ).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText("1,300 kcal remaining")).toBeVisible();
+});
+test("different days, steps and undo recalculate independently", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("Rice");
+  await page.getByLabel("Portion", { exact: true }).fill("100 g cooked");
+  await page.getByLabel("Estimated calories", { exact: true }).fill("130");
+  await page.getByLabel("Date", { exact: true }).fill("2026-01-01");
+  await page.getByRole("button", { name: "Confirm & log" }).click();
+  await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByLabel("Ledger date").fill("2026-01-01");
+  await expect(page.getByText("130 kcal eaten · estimated")).toBeVisible();
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Add manually", exact: true }).click();
+  await page.getByLabel("Steps", { exact: true }).fill("6420");
+  await page.getByRole("button", { name: "Save steps" }).click();
+  await expect(page.getByText("6,420", { exact: true })).toBeVisible();
+  await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByLabel("Ledger date").fill("2026-01-01");
+  await expect(page.getByText("Nothing logged for this day.")).toBeVisible();
+});
+test('explicit pause phrase is a local control, not a fake AI reply', async ({page}) => {
+ await seed(page);
+ await page.getByLabel('Message',{exact:true}).fill('I don’t care today');
+ await page.getByRole('button',{name:'Send message'}).click();
+ await expect(page.getByText('Suggestions paused today.',{exact:false})).toBeVisible();
+ await expect(page.locator('.bubble.user')).toContainText('I don’t care today');
+ await expect(page.getByText('1,800 kcal remaining')).toBeVisible();
+});

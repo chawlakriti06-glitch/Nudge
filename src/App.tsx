@@ -913,10 +913,38 @@ export default function App() {
           <section className="calorie-panel">
             <div
               className="ring"
-              style={{
-                background: `conic-gradient(#FF784F ${Math.min(100, (t.eaten / (p?.budget || 1)) * 100)}%, #FFE5D4 0)`,
-              }}
+              role="progressbar"
+              aria-label="Daily calorie intake"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(
+                100,
+                Math.max(0, (t.eaten / (p?.budget || 1)) * 100),
+              )}
+              aria-valuetext={`${t.eaten} of ${p?.budget} kcal eaten${t.remaining < 0 ? `; ${-t.remaining} kcal over budget` : ""}`}
             >
+              <svg
+                className="calorie-ring"
+                viewBox="0 0 145 145"
+                aria-hidden="true"
+              >
+                <circle className="calorie-track" cx="72.5" cy="72.5" r="67" />
+                <circle
+                  className="calorie-progress"
+                  cx="72.5"
+                  cy="72.5"
+                  r="67"
+                  pathLength="100"
+                  strokeDasharray="100"
+                  strokeDashoffset={
+                    100 -
+                    Math.min(
+                      100,
+                      Math.max(0, (t.eaten / (p?.budget || 1)) * 100),
+                    )
+                  }
+                />
+              </svg>
               <div>
                 <strong>{t.eaten.toLocaleString()}</strong>
                 <span>/ {p?.budget.toLocaleString()} kcal</span>

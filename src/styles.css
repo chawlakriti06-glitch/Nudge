@@ -453,13 +453,14 @@ input::placeholder {
   width: 145px;
   height: 145px;
   border-radius: 50%;
-  padding: 11px;
+  position: relative;
   margin: auto;
 }
 .ring > div {
+  position: absolute;
+  inset: 11px;
   border-radius: 50%;
   background: #fffefd;
-  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1049,4 +1050,27 @@ input::placeholder {
   width: 84%;
   height: 84%;
   color: #172b43;
+}
+
+.calorie-ring {
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: rotate(-90deg);
+}
+.calorie-ring circle {
+  fill: none;
+  stroke-width: 11px;
+}
+.calorie-track {
+  stroke: #ffe5d4;
+}
+.calorie-progress {
+  stroke: #ff784f;
+  transition: stroke-dashoffset 650ms ease-in-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .calorie-progress {
+    transition: none;
+  }
 }

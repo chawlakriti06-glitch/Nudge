@@ -345,3 +345,40 @@ test("deployed HTML API fallback explains setup and preserves saved intake", asy
   );
   await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
 });
+test("calorie arc follows confirmed food, edits, delete and undo", async ({
+  page,
+}) => {
+  await seed(page);
+  const ring = page.getByRole("progressbar", { name: "Daily calorie intake" });
+  const arc = page.locator(".calorie-progress");
+  await expect(ring).toHaveAttribute("aria-valuenow", "0");
+  await expect(arc).toHaveAttribute("stroke-dashoffset", "100");
+  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("Lunch");
+  await page.getByLabel("Portion", { exact: true }).fill("1 plate");
+  await page.getByLabel("Estimated calories", { exact: true }).fill("900");
+  await expect(ring).toHaveAttribute("aria-valuenow", "0");
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await expect(ring).toHaveAttribute("aria-valuenow", "50");
+  await expect(arc).toHaveAttribute("stroke-dashoffset", "50");
+  await expect(
+    page.getByText("900 kcal remaining", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Estimated calories", { exact: true }).fill("450");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(ring).toHaveAttribute("aria-valuenow", "25");
+  await expect(arc).toHaveAttribute("stroke-dashoffset", "75");
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await expect(ring).toHaveAttribute("aria-valuenow", "0");
+  await expect(arc).toHaveAttribute("stroke-dashoffset", "100");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(ring).toHaveAttribute("aria-valuenow", "25");
+  await page.reload();
+  await expect(ring).toHaveAttribute("aria-valuenow", "25");
+});

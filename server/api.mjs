@@ -221,7 +221,23 @@ export async function handleApi(
       }),
       signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
     };
-    let upstream = await fetchProvider(providerUrl, providerOptions);
+    const callProvider = async (options) => {
+      let response = await fetchProvider(providerUrl, options);
+      if (
+        [500, 502, 503, 504].includes(response.status) &&
+        deadline - Date.now() > 3000
+      ) {
+        const retryAfter = Number(response.headers.get("retry-after"));
+        const delay = retryAfter > 0 ? Math.min(2000, retryAfter * 1000) : 800;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        response = await fetchProvider(providerUrl, {
+          ...options,
+          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+        });
+      }
+      return response;
+    };
+    let upstream = await callProvider(providerOptions);
     // Some models reject schema constraints despite accepting JSON mode.
     // Retry the same model once; validate the response before any state change.
     if (upstream.status === 400 && deadline - Date.now() > 2000) {
@@ -241,7 +257,7 @@ export async function handleApi(
         payload.systemInstruction.parts.push({
           text: `Return only valid JSON following this exact contract: ${JSON.stringify(responseSchema)}. No markdown. Empty arrays are allowed; never invent a food quantity.`,
         });
-        upstream = await fetchProvider(providerUrl, {
+        upstream = await callProvider({
           ...providerOptions,
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
@@ -251,13 +267,14 @@ export async function handleApi(
     if (!upstream.ok) {
       const errors = {
         429: "Gemini's free-tier limit is reached. Wait and retry later, or check the project's free-tier quota in Google AI Studio. No paid fallback was attempted.",
+        503: "Gemini is temporarily unavailable or busy. An automatic retry also failed. Please try again shortly.",
         400: "Gemini rejected the request. Check that the chosen model supports structured JSON responses.",
         401: "Gemini could not authenticate. Check NUDGE_GEMINI_API_KEY in your host’s environment settings.",
         403: "Gemini access was denied. Check the Google AI Studio key, project permissions and availability in your region.",
         404: "The selected Gemini model is unavailable. Set NUDGE_GEMINI_MODEL to a currently available free-tier model in Google AI Studio.",
       };
       let detail = "";
-      if ([400, 404].includes(upstream.status)) {
+      if ([400, 404, 503].includes(upstream.status)) {
         try {
           const providerError = await upstream.json();
           if (typeof providerError.error?.message === "string") {
@@ -272,7 +289,7 @@ export async function handleApi(
         }
       }
       return json(502, {
-        error: `${upstream.status === 404 ? `Gemini returned 404 for model "${model}". ${detail ? `Google says: ${detail} ` : ""}Check /api/models for the names available to this key.` : upstream.status === 400 ? `Gemini rejected the request (400). ${detail ? `Google says: ${detail}` : "Check the model’s structured response support."}` : errors[upstream.status] || `Gemini could not complete this request (${upstream.status}). Please retry later.`} Your saved data is unchanged. Manual logging still works.`,
+        error: `${upstream.status === 404 ? `Gemini returned 404 for model "${model}". ${detail ? `Google says: ${detail} ` : ""}Check /api/models for the names available to this key.` : upstream.status === 400 ? `Gemini rejected the request (400). ${detail ? `Google says: ${detail}` : "Check the model’s structured response support."}` : upstream.status === 503 ? `${errors[503]}${detail ? ` Google says: ${detail}` : ""}` : errors[upstream.status] || `Gemini could not complete this request (${upstream.status}). Please retry later.`} Your saved data is unchanged. Manual logging still works.`,
       });
     }
     const result = await upstream.json();

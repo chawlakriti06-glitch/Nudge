@@ -737,3 +737,73 @@ test("a craving adjustment can only target a meal in today's approved menu", asy
     expect(r.status).toBe(proposedDay === "Thu" ? 200 : 502);
   }
 });
+test("temporary Gemini 503 retries once on the same model and returns a usable estimate", async () => {
+  let calls = 0;
+  const response = await handleApi(
+    request({
+      message: "I ate 2 boiled eggs",
+      context: { profile: { meals: 3 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test-key", NUDGE_GEMINI_MODEL: "gemini-example" },
+    async (url: string) => {
+      expect(url).toContain("gemini-example:generateContent");
+      if (++calls === 1)
+        return new Response(
+          JSON.stringify({ error: { message: "Model busy" } }),
+          { status: 503 },
+        );
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              finishReason: "STOP",
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      kind: "log",
+                      message: "Estimate",
+                      foods: [
+                        {
+                          name: "Boiled eggs",
+                          portion: "2 large eggs",
+                          calories: 156,
+                          protein: 12.6,
+                          fibre: 0,
+                          assumptions: "No added fat",
+                        },
+                      ],
+                      adjustments: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(response.status).toBe(200);
+});
+test("persistent Gemini 503 stops after one retry with a redacted provider reason", async () => {
+  let calls = 0;
+  const response = await handleApi(
+    request(),
+    { NUDGE_GEMINI_API_KEY: "private-key" },
+    async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({ error: { message: "High demand private-key" } }),
+        { status: 503 },
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(response.status).toBe(502);
+  const body = await response.json();
+  expect(body.error).toContain("High demand");
+  expect(body.error).toContain("automatic retry");
+  expect(body.error).not.toContain("private-key");
+});

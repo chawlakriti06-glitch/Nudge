@@ -1109,3 +1109,26 @@ input::placeholder {
 .calorie-panel .remaining {
   grid-column: 1 / -1;
 }
+
+.chat-markdown {
+  white-space: normal;
+}
+.bubble.assistant .chat-markdown p {
+  margin: 0 0 12px;
+  font-size: inherit;
+}
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 20px;
+  margin: 12px 0;
+}
+.chat-markdown li {
+  margin: 6px 0;
+}
+.chat-markdown a {
+  color: inherit;
+  text-decoration: underline;
+}

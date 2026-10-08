@@ -1,3 +1,4 @@
+import ReactMarkdown from "react-markdown";
 import { referenceEstimate } from "./nutrition";
 import { dietFor } from "./diet.js";
 import { readApiJson } from "./api";
@@ -1437,7 +1438,15 @@ export default function App() {
             {state.chat.map((c) => (
               <div className={`chat-line ${c.role}`} key={c.id}>
                 {c.role === "assistant" && <Logo small />}
-                <div className={`bubble ${c.role}`}>{c.text}</div>
+                <div className={`bubble ${c.role}`}>
+                  {c.role === "assistant" ? (
+                    <div className="chat-markdown">
+                      <ReactMarkdown skipHtml>{c.text}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    c.text
+                  )}
+                </div>
               </div>
             ))}
             {busy && (

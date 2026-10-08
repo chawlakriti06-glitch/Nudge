@@ -186,6 +186,25 @@ export async function handleApi(
     );
   }
 
+  // Explicit completion statements also survive a plain conversational reply.
+  // These deliberately narrow assertions do not classify general chat intent
+  // or infer nutrition. Negations, hypothetical meals and cravings do not match.
+  const completionStatement = body.message.trim();
+  const explicitCompletedSlots =
+    /^(?:i\s+(?:have\s+)?(?:already\s+)?(?:had|eaten|finished)\s+all\s+(?:(?:3|three|4|four)\s+)?(?:my\s+)?meals\b|all\s+(?:my\s+)?(?:3\s+|three\s+|4\s+|four\s+)?meals\s+(?:are\s+)?(?:done|finished)\b)/i.test(
+      completionStatement,
+    )
+      ? count === 4
+        ? ["Breakfast", "Lunch", "Snacks", "Dinner"]
+        : ["Breakfast", "Lunch", "Dinner"]
+      : [];
+  if (explicitCompletedSlots.length)
+    body.context.completedSlots = [
+      ...new Set([
+        ...(body.context.completedSlots || []),
+        ...explicitCompletedSlots,
+      ]),
+    ];
   const conversationalChat =
     !fullWeekRequest && body.operation !== "adjustment";
   const reviewRequest = body.operation === "adjustment";
@@ -551,7 +570,9 @@ export async function handleApi(
         return json(200, {
           kind: "message",
           message: call.args.message,
-          completedSlots: [...new Set(call.args.slots)],
+          completedSlots: [
+            ...new Set([...explicitCompletedSlots, ...call.args.slots]),
+          ],
           foods: [],
           days: [],
           adjustments: [],
@@ -620,6 +641,7 @@ export async function handleApi(
           );
         return json(200, {
           message: text.trim(),
+          completedSlots: explicitCompletedSlots,
           kind: "message",
           foods: [],
           days: [],
@@ -640,7 +662,10 @@ export async function handleApi(
         );
       }
     }
+    if (conversationalChat && parsed && explicitCompletedSlots.length)
+      parsed.completedSlots = explicitCompletedSlots;
     if (conversationalChat && parsed?.kind === "message") {
+      parsed.completedSlots = explicitCompletedSlots;
       parsed.foods = [];
       parsed.days = [];
       parsed.adjustments = [];

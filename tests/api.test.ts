@@ -1795,7 +1795,7 @@ test("completed meal status requires a real user statement", async () => {
     },
   );
   expect(response.status).toBe(200);
-  expect((await response.json()).completedSlots).toBeUndefined();
+  expect((await response.json()).completedSlots).toEqual([]);
   expect(calls).toBe(2);
 });
 
@@ -1886,4 +1886,59 @@ test("an invalid dinner review retries the provider before returning a complete 
     dinner.portion,
   );
   expect(calls).toBe(2);
+});
+
+test("an explicit all-meals completion survives a plain AI reply", async () => {
+  const response = await handleApi(
+    request({
+      operation: "chat",
+      message: "i have had all 3 meals of the day\ni want something sweet",
+      context: { profile: { meals: 3 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: "Try a small bowl of kheer, about 220 kcal." }],
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  expect(await response.json()).toMatchObject({
+    kind: "message",
+    completedSlots: ["Breakfast", "Lunch", "Dinner"],
+    foods: [],
+    adjustments: [],
+  });
+});
+
+test("a future or negated meal statement never marks all meals finished", async () => {
+  for (const message of [
+    "I haven't had all 3 meals",
+    "I want to finish all my meals",
+    "If I have had all 3 meals, what can I eat?",
+  ]) {
+    const response = await handleApi(
+      request({
+        operation: "chat",
+        message,
+        context: { profile: { meals: 3 } },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test" },
+      async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              { content: { parts: [{ text: "Let's discuss your options." }] } },
+            ],
+          }),
+        ),
+    );
+    expect((await response.json()).completedSlots).toEqual([]);
+  }
 });

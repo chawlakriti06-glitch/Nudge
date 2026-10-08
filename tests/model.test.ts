@@ -143,3 +143,23 @@ it("distinguishes Indian vegetarian, eggetarian, vegan and non-vegetarian diets"
     conflict(meal("Chicken"), { ...base, preferences: "Non-vegetarian" }),
   ).toBe("");
 });
+it("rejects generic meal labels as confirmable food previews", () => {
+  expect(() =>
+    validateResponse(
+      {
+        kind: "log",
+        message: "Preview",
+        days: [],
+        foods: [
+          {
+            name: "Breakfast",
+            portion: "Breakfast",
+            assumptions: "Breakfast",
+            calories: 250,
+          },
+        ],
+      },
+      p,
+    ),
+  ).toThrow("actual food or portion");
+});

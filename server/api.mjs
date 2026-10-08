@@ -134,7 +134,9 @@ export async function handleApi(
   responseSchema.properties.days.maxItems = 7;
   const fullWeekRequest =
     body.operation === "menu" ||
-    /seven[ -]day|complete revised|generate.*(?:menu|week)/i.test(body.message);
+    /^menu$|seven[ -]day|complete revised|generate.*(?:menu|week)/i.test(
+      body.message,
+    );
   if (fullWeekRequest) {
     responseSchema.properties.kind.enum = ["plan"];
     responseSchema.properties.days = object(
@@ -159,16 +161,16 @@ export async function handleApi(
   const intakeRequest = /^i\s+(?:ate|had|have eaten|just ate)\b/i.test(
     body.message,
   );
-  if (intakeRequest && !fullWeekRequest) {
+  if (!fullWeekRequest) {
+    // A separate compact contract also covers short portion follow-ups.
     responseSchema.properties.kind.enum = ["message", "log"];
-    // Food estimates do not need the deeply nested weekly menu schema.
-    responseSchema.properties.days = {
-      type: "array",
-      items: string,
-      maxItems: 0,
-    };
+    delete responseSchema.properties.days;
+    responseSchema.required = responseSchema.required.filter(
+      (key) => key !== "days",
+    );
   }
-  const portionRules = `Respond to the actual food question, never with just a meal label such as Breakfast. For consumption requests, ask a concise question about missing quantities/preparation with kind message and empty foods/days. For eggs and bread without quantities, ask how many eggs and bread slices, and how the eggs were cooked or whether butter/oil was added. Use earlier conversation to interpret answers such as '2 eggs and 1 slice'. Once portions are clear, return kind log with a preview of estimated nutrition; never save it. Do not guess an unspecified portion. A meal name alone is not an answer. ${repairAttempt ? "Your prior response was only a meal label. Correct it by asking the needed portion question or supplying a log preview if quantities are known." : ""}`;
+
+  const portionRules = `Respond to the actual food question, never with just a meal label such as Breakfast. For consumption requests, ask a concise question about missing quantities/preparation with kind message and empty foods/days. For eggs and bread without quantities, ask how many eggs and bread slices, and how the eggs were cooked or whether butter/oil was added. Use earlier conversation to interpret answers such as '2 eggs and 1 slice'. Once portions are clear, return kind log with a preview of estimated nutrition; never save it. Do not guess an unspecified portion. A meal name alone is not an answer. ${repairAttempt ? "Your prior response used a meal label instead of food details. Correct it with actual food names, explicit portion quantities and preparation assumptions, or ask the needed clarification." : ""}`;
   const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun, and every named meal property inside each day. Meal keys define the slots; do not output a meals array for this schema. Actual consumed food does not replace a planned meal slot.`;
   try {
     if (!/^gemini-[a-z0-9.-]+$/i.test(model))
@@ -188,7 +190,7 @@ export async function handleApi(
           systemInstruction: {
             parts: [
               {
-                text: `${instructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : "For food questions, return empty days. Focus on the portion and calorie question; do not generate a weekly menu."}\n${portionRules}`,
+                text: `${instructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : "For chat, return only message, kind and foods as specified by the schema. Estimate any food the user actually ate, whether or not it is on their menu. Do not substitute a planned meal for their actual food. Use chat history for short portion follow-ups. Ask about unclear preparation or added fats. Do not generate a weekly menu."}\n${portionRules}`,
               },
             ],
           },
@@ -257,6 +259,12 @@ export async function handleApi(
         error: "AI returned no usable response. Your saved data is unchanged.",
       });
     const parsed = JSON.parse(text);
+    if (!fullWeekRequest && parsed && parsed.kind !== "plan") parsed.days = [];
+    const onlyMealLabel = (value) =>
+      typeof value === "string" &&
+      /^(?:breakfast|lunch|dinner|snacks?|meal|morning meal)[.!]?$/i.test(
+        value.trim(),
+      );
     if (
       fullWeekRequest &&
       parsed?.days &&
@@ -294,10 +302,15 @@ export async function handleApi(
         error: "AI returned malformed output. Your saved data is unchanged.",
       });
     if (
-      parsed.kind === "message" &&
-      /^(?:breakfast|lunch|dinner|snacks?|meal|morning meal)[.!]?$/i.test(
-        parsed.message.trim(),
-      )
+      (parsed.kind === "message" && onlyMealLabel(parsed.message)) ||
+      (parsed.kind === "log" &&
+        parsed.foods.some(
+          (food) =>
+            onlyMealLabel(food.name) ||
+            onlyMealLabel(food.portion) ||
+            !food.portion?.trim() ||
+            !food.assumptions?.trim(),
+        ))
     ) {
       if (repairAttempt === 0 && deadline - Date.now() > 2000)
         return handleApi(

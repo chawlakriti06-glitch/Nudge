@@ -851,6 +851,13 @@ export default function App() {
   const accept = () => {
     if (!proposal) return;
     if (proposal.kind === "log") {
+      try {
+        validateResponse({ ...proposal, message: "Food preview" }, p!);
+      } catch (e) {
+        setError((e as Error).message);
+        setProposal(null);
+        return;
+      }
       setUndo(state.foods);
       update({
         foods: [

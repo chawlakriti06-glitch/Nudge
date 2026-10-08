@@ -230,7 +230,7 @@ test.each([3, 4])(
         meals: slots
           .map((slot) => ({
             slot,
-            name: "Rice",
+            name: `${day} rice`,
             portion: "1 bowl",
             ingredients: ["rice"],
             calories: 300,
@@ -245,11 +245,10 @@ test.each([3, 4])(
       async (_url: string, opts: any) => {
         const payload = JSON.parse(opts.body);
         const meals =
-          payload.generationConfig.responseJsonSchema.properties.days.items
-            .properties.meals;
-        expect(meals.minItems).toBe(count);
-        expect(meals.maxItems).toBe(count);
-        expect(meals.items.properties.slot.enum).toEqual(slots);
+          payload.generationConfig.responseJsonSchema.properties.days.properties
+            .Mon.properties.meals;
+        expect(meals.required).toEqual(slots);
+        expect(Object.keys(meals.properties)).toEqual(slots);
         return new Response(
           JSON.stringify({
             candidates: [
@@ -507,11 +506,12 @@ test("food estimates use a compact schema and omit full-week instructions", asyn
     { NUDGE_GEMINI_API_KEY: "test-key" },
     async (_url: string, init: RequestInit) => {
       const sent = JSON.parse(init.body as string);
-      expect(sent.generationConfig.responseJsonSchema.properties.days).toEqual({
-        type: "array",
-        items: { type: "string" },
-        maxItems: 0,
-      });
+      expect(
+        sent.generationConfig.responseJsonSchema.properties,
+      ).not.toHaveProperty("days");
+      expect(sent.generationConfig.responseJsonSchema.required).not.toContain(
+        "days",
+      );
       expect(sent.systemInstruction.parts[0].text).not.toContain(
         "Return the complete revised week. When the schema",
       );
@@ -555,4 +555,64 @@ test("400 reports provider diagnosis while redacting the API key", async () => {
   const body = await response.json();
   expect(body.error).toContain("Schema too complex");
   expect(body.error).not.toContain("private-test-key");
+});
+test("a short off-menu follow-up corrects meal-label food previews", async () => {
+  let calls = 0;
+  const response = await handleApi(
+    request({
+      message: "with 2 eggs",
+      context: {
+        profile: { meals: 3 },
+        history: [{ role: "user", text: "I ate toast" }],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test-key" },
+    async (_url: string, init: RequestInit) => {
+      const sent = JSON.parse(init.body as string);
+      expect(
+        sent.generationConfig.responseJsonSchema.properties,
+      ).not.toHaveProperty("days");
+      calls++;
+      const foods =
+        calls === 1
+          ? [
+              {
+                name: "Breakfast",
+                portion: "Breakfast",
+                calories: 250,
+                assumptions: "Breakfast",
+              },
+            ]
+          : [
+              {
+                name: "Eggs and toast",
+                portion: "2 eggs and 1 bread slice",
+                calories: 230,
+                assumptions: "Boiled eggs and plain toast; no added fat",
+              },
+            ];
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      kind: "log",
+                      message: "Preview",
+                      foods,
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(calls).toBe(2);
+  expect((await response.json()).foods[0].name).toBe("Eggs and toast");
 });

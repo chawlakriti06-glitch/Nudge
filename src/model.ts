@@ -188,6 +188,20 @@ export function validateResponse(raw: unknown, p: Profile) {
       !number(f.calories)
     )
       throw Error("Invalid food estimate.");
+  if (
+    r.kind === "log" &&
+    r.foods.some(
+      (f) =>
+        !f.name.trim() ||
+        !f.portion.trim() ||
+        !f.assumptions.trim() ||
+        /^(breakfast|lunch|dinner|snacks?|meal)[.!]?$/i.test(f.name.trim()) ||
+        /^(breakfast|lunch|dinner|snacks?|meal)[.!]?$/i.test(f.portion.trim()),
+    )
+  )
+    throw Error(
+      "The food preview is missing actual food or portion details. Please retry or correct it manually.",
+    );
   if (r.kind === "log" && !r.foods.length)
     throw Error("Food preview is empty.");
   if (r.kind === "plan") {

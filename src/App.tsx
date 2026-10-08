@@ -1781,6 +1781,7 @@ export default function App() {
                   {!!state.draft.length && (
                     <button
                       className="primary"
+                      disabled={d.meals.every((m) => m.approved)}
                       onClick={() => {
                         if (d.meals.some((m) => conflict(m, p!))) {
                           setError(
@@ -1803,7 +1804,10 @@ export default function App() {
                         });
                       }}
                     >
-                      Approve {d.day} <Check size={16} />
+                      {d.meals.every((m) => m.approved)
+                        ? `${d.day} approved`
+                        : `Approve ${d.day}`}{" "}
+                      <Check size={16} />
                     </button>
                   )}
                 </div>

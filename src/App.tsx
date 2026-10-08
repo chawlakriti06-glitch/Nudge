@@ -2,7 +2,7 @@ import ReactMarkdown from "react-markdown";
 import { referenceEstimate } from "./nutrition";
 import { dietFor } from "./diet.js";
 import { readApiJson } from "./api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Home,
   Utensils,
@@ -652,6 +652,24 @@ export default function App() {
   const requestEpoch = useRef(0);
   const aiSucceeded = useRef(false);
   const recognition = useRef<any>(null);
+  const messageInput = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const resize = () => {
+      const field = messageInput.current;
+      if (!field) return;
+      field.style.height = "auto";
+      field.style.height = `${Math.min(160, field.scrollHeight)}px`;
+      const dock = field.closest(".chat-input-dock");
+      if (dock)
+        document.documentElement.style.setProperty(
+          "--composer-dock-height",
+          `${dock.getBoundingClientRect().height}px`,
+        );
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [text, screen]);
   const chatEnd = useRef<HTMLDivElement>(null);
   const draftStart = useRef<HTMLDivElement>(null);
   const scrollToDraft = useRef(false);
@@ -930,28 +948,72 @@ export default function App() {
       (window as any).webkitSpeechRecognition;
     if (!SR) {
       setError(
-        "Dictation is not supported in this browser. Please type your message.",
+        "This browser doesn't support the app's microphone. You can use the microphone on your phone's keyboard to dictate into this text box.",
       );
       return;
     }
-    if (recording) {
+    if (recognition.current) {
       recognition.current?.stop();
       return;
     }
     try {
+      setError("");
       const r = new SR();
       recognition.current = r;
       r.lang = language === "English" ? "en-IN" : "hi-IN";
-      r.onstart = () => setRecording(true);
-      r.onend = () => setRecording(false);
-      r.onerror = () => {
-        setRecording(false);
-        setError("Microphone access or dictation failed. Please type instead.");
+      r.interimResults = false;
+      r.continuous = false;
+      const start = messageInput.current?.selectionStart ?? text.length;
+      const end = messageInput.current?.selectionEnd ?? start;
+      const before = text.slice(0, start);
+      const after = text.slice(end);
+      const segments = new Map<number, string>();
+      r.onstart = () => {
+        if (recognition.current === r) setRecording(true);
       };
-      r.onresult = (e: any) =>
-        setText((v) => `${v} ${e.results[0][0].transcript}`.trim());
+      r.onend = () => {
+        if (recognition.current !== r) return;
+        recognition.current = null;
+        setRecording(false);
+      };
+      r.onerror = (event: any) => {
+        if (recognition.current !== r) return;
+        recognition.current = null;
+        setRecording(false);
+        if (event.error === "aborted") return;
+        setError(
+          event.error === "not-allowed" || event.error === "service-not-allowed"
+            ? "Microphone permission was denied. Allow microphone access in your browser settings, or use your keyboard's dictation microphone."
+            : event.error === "no-speech"
+              ? "No speech was detected. Tap the microphone and try again."
+              : "Voice recognition couldn't finish. Your text is still here; try your keyboard's dictation microphone or edit it directly.",
+        );
+      };
+      r.onresult = (event: any) => {
+        if (recognition.current !== r) return;
+        for (let i = event.resultIndex ?? 0; i < event.results.length; i++)
+          if (event.results[i].isFinal !== false)
+            segments.set(i, event.results[i][0].transcript.trim());
+        if (!segments.size) return;
+        const spoken = [...segments.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([, value]) => value)
+          .join(" ");
+        const inserted = `${before && !/\s$/.test(before) ? " " : ""}${spoken}${after && !/^\s/.test(after) ? " " : ""}`;
+        const next = `${before}${inserted}${after}`.slice(0, 4000);
+        setText(next);
+        requestAnimationFrame(() => {
+          if (recognition.current !== r) return;
+          const position = Math.min(
+            next.length,
+            before.length + inserted.length,
+          );
+          messageInput.current?.setSelectionRange(position, position);
+        });
+      };
       r.start();
     } catch {
+      recognition.current = null;
       setRecording(false);
       setError("Could not start dictation. Please type instead.");
     }
@@ -962,6 +1024,10 @@ export default function App() {
       onSubmit={(e) => {
         e.preventDefault();
         if (!text.trim()) return;
+        const active = recognition.current;
+        recognition.current = null;
+        active?.abort();
+        setRecording(false);
         if (welcome) {
           update({ pending: text });
           setText("");
@@ -972,15 +1038,24 @@ export default function App() {
       <button
         type="button"
         aria-label={recording ? "Stop dictation" : "Start dictation"}
+        aria-pressed={recording}
         className={recording ? "recording" : ""}
         onClick={dictate}
       >
         <Mic size={22} />
       </button>
-      <input
+      <textarea
+        ref={messageInput}
+        rows={1}
         aria-label="Message"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          const active = recognition.current;
+          recognition.current = null;
+          active?.abort();
+          setRecording(false);
+          setText(e.target.value);
+        }}
         placeholder="Food, cravings, or just a chat…"
         maxLength={4000}
       />

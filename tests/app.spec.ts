@@ -1557,3 +1557,79 @@ test("chat logs approved draft menu meals with their original nutrition only aft
     "760 of 1800 kcal",
   );
 });
+
+test("message field grows for long text and supports editing in the middle", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Let’s get started", exact: true })
+    .click();
+  const field = page.getByRole("textbox", { name: "Message", exact: true });
+  await expect(field).toHaveJSProperty("tagName", "TEXTAREA");
+  const initial = (await field.boundingBox())!.height;
+  const content =
+    "I had breakfast with two eggs and toast. Then I had rajma rice for lunch. I would like to talk about dinner and review exactly what I have written before sending this message.\nAlso I had tea with milk.";
+  await field.fill(content);
+  expect((await field.boundingBox())!.height).toBeGreaterThan(initial);
+  await field.evaluate((element: HTMLTextAreaElement) =>
+    element.setSelectionRange(6, 15),
+  );
+  await field.press("Backspace");
+  await field.type("a snack");
+  await expect(field).toHaveValue(
+    content.slice(0, 6) + "a snack" + content.slice(15),
+  );
+  await field.fill("Long food message. ".repeat(100));
+  expect((await field.boundingBox())!.height).toBeLessThanOrEqual(160);
+  expect(await field.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(
+    true,
+  );
+});
+
+test("dictation inserts at selection and does not repeat final results or overwrite later edits", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      onstart: any;
+      onresult: any;
+      onend: any;
+      onerror: any;
+      start() {
+        (window as any).testSpeech = this;
+        this.onstart?.();
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {
+        this.onend?.();
+      }
+    }
+    (window as any).SpeechRecognition = FakeRecognition;
+  });
+  await seed(page);
+  const field = page.getByRole("textbox", { name: "Message", exact: true });
+  await field.fill("I had toast today");
+  await field.evaluate((el: HTMLTextAreaElement) =>
+    el.setSelectionRange(6, 11),
+  );
+  await page.getByRole("button", { name: "Start dictation" }).click();
+  const emit = async () =>
+    page.evaluate(() => {
+      const result: any = [{ transcript: "two eggs" }];
+      result.isFinal = true;
+      (window as any).testSpeech.onresult({
+        resultIndex: 0,
+        results: [result],
+      });
+    });
+  await emit();
+  await expect(field).toHaveValue("I had two eggs today");
+  await emit();
+  await expect(field).toHaveValue("I had two eggs today");
+  await field.fill("I had three eggs today");
+  await emit();
+  await expect(field).toHaveValue("I had three eggs today");
+});

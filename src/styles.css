@@ -292,7 +292,7 @@ a {
   color: #35577c;
   flex-shrink: 0;
 }
-.composer input {
+.composer textarea {
   min-width: 0;
   flex: 1;
   background: none;
@@ -300,8 +300,14 @@ a {
   padding: 8px 5px;
   font-size: 14px;
   color: #102f56;
+  resize: none;
+  line-height: 1.5;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  touch-action: auto;
 }
-.composer input:focus {
+.composer textarea:focus {
   outline: 0;
 }
 .composer .send {
@@ -1389,7 +1395,7 @@ fieldset > .two-col {
   box-shadow: none;
   background: #fffefa;
 }
-.composer input {
+.composer textarea {
   font-size: 16px;
 }
 .send {
@@ -1677,7 +1683,9 @@ fieldset > .two-col {
   height: var(--navigation-height);
 }
 .chat-shell {
-  padding-bottom: calc(var(--navigation-height) + 104px);
+  padding-bottom: calc(
+    var(--navigation-height) + var(--composer-dock-height, 104px) + 24px
+  );
 }
 .chat-input-dock {
   position: fixed;

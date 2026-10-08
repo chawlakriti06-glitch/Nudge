@@ -1241,7 +1241,14 @@ select:focus {
 .starter h2 {
   color: #082957;
   font-size: 24px;
-  margin: 32px 0 64px;
+  margin: 32px 0 20px;
+}
+.starter p.starter-description {
+  max-width: 340px;
+  margin: 0 0 40px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: #35577c;
 }
 .starter h2::before {
   content: "";

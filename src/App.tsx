@@ -1383,6 +1383,11 @@ export default function App() {
             A little nudge.
             <br />A lot less overthinking.
           </h2>
+          <p className="starter-description">
+            Chat about what you ate or what you’re craving. Track calories,
+            protein and fibre, and plan meals around your preferences—with
+            changes you approve.
+          </p>
         </div>
         <button className="primary" onClick={() => setScreen("welcome")}>
           Let’s get started <ArrowUp size={18} />

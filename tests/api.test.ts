@@ -349,3 +349,83 @@ test.each([3, 4])(
     expect(plan.days.every((d: any) => d.meals.length === count)).toBe(true);
   },
 );
+test("a meal label gets one real provider correction, not a fabricated assistant answer", async () => {
+  let calls = 0;
+  const r = await handleApi(
+    request({
+      message: "I ate eggs and bread",
+      context: { profile: { meals: 3 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async (_url: string, opts: any) => {
+      calls++;
+      const payload = JSON.parse(opts.body);
+      expect(
+        payload.generationConfig.responseJsonSchema.properties.kind.enum,
+      ).toEqual(["message", "log"]);
+      expect(payload.systemInstruction.parts[0].text).toContain(
+        "how many eggs",
+      );
+      const message =
+        calls === 1
+          ? "Breakfast"
+          : "How many eggs and bread slices did you have, and how were the eggs cooked?";
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      message,
+                      kind: "message",
+                      foods: [],
+                      days: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(r.status).toBe(200);
+  expect((await r.json()).message).toContain("How many eggs");
+});
+test("unhelpful labels stop after one correction and never log food", async () => {
+  let calls = 0;
+  const r = await handleApi(
+    request(),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      message: "Breakfast",
+                      kind: "message",
+                      foods: [],
+                      days: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(r.status).toBe(502);
+  expect((await r.json()).error).toContain("Nothing was logged");
+});

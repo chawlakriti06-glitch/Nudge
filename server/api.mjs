@@ -44,6 +44,8 @@ export async function handleApi(
   request,
   env = process.env,
   fetchProvider = fetch,
+  repairAttempt = 0,
+  deadline = Date.now() + 55000,
 ) {
   const path = new URL(request.url).pathname.replace(
     /^\/\.netlify\/functions\/api/,
@@ -145,6 +147,11 @@ export async function handleApi(
     );
   }
 
+  const intakeRequest = /^i\s+(?:ate|had|have eaten|just ate)\b/i.test(
+    body.message,
+  );
+  if (intakeRequest) responseSchema.properties.kind.enum = ["message", "log"];
+  const portionRules = `Respond to the actual food question, never with just a meal label such as Breakfast. For consumption requests, ask a concise question about missing quantities/preparation with kind message and empty foods/days. For eggs and bread without quantities, ask how many eggs and bread slices, and how the eggs were cooked or whether butter/oil was added. Use earlier conversation to interpret answers such as '2 eggs and 1 slice'. Once portions are clear, return kind log with a preview of estimated nutrition; never save it. Do not guess an unspecified portion. A meal name alone is not an answer. ${repairAttempt ? "Your prior response was only a meal label. Correct it by asking the needed portion question or supplying a log preview if quantities are known." : ""}`;
   const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun. Actual consumed food does not replace a planned meal slot.`;
   try {
     if (!/^gemini-[a-z0-9.-]+$/i.test(model))
@@ -162,7 +169,7 @@ export async function handleApi(
         },
         body: JSON.stringify({
           systemInstruction: {
-            parts: [{ text: `${instructions}\n${menuRules}` }],
+            parts: [{ text: `${instructions}\n${menuRules}\n${portionRules}` }],
           },
           contents: [
             {
@@ -183,7 +190,7 @@ export async function handleApi(
             maxOutputTokens: 12000,
           },
         }),
-        signal: AbortSignal.timeout(55000),
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       },
     );
     if (!upstream.ok) {
@@ -252,6 +259,29 @@ export async function handleApi(
       return json(502, {
         error: "AI returned malformed output. Your saved data is unchanged.",
       });
+    if (
+      parsed.kind === "message" &&
+      /^(?:breakfast|lunch|dinner|snacks?|meal|morning meal)[.!]?$/i.test(
+        parsed.message.trim(),
+      )
+    ) {
+      if (repairAttempt === 0 && deadline - Date.now() > 2000)
+        return handleApi(
+          new Request(request.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+          env,
+          fetchProvider,
+          1,
+          deadline,
+        );
+      return json(502, {
+        error:
+          "Gemini did not answer the portion question. Please retry, or enter the food and portion manually. Nothing was logged.",
+      });
+    }
     if (parsed.kind === "plan") {
       const aliases = {
         monday: "Mon",

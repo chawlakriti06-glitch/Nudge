@@ -60,6 +60,18 @@ function read() {
         (c: { role: string; text: string }) =>
           !(c.role === "user" && internalMenuPrompt(c.text)),
       );
+    if (s && Array.isArray(s.chat))
+      s.chat = s.chat.map((c: { role: string; text: string }) =>
+        c.role === "user"
+          ? {
+              ...c,
+              text: c.text.replace(
+                /\. Prepare a food preview or ask for portion clarification\.$/,
+                "",
+              ),
+            }
+          : c,
+      );
     return s && Array.isArray(s.foods) && Array.isArray(s.chat)
       ? (s as State)
       : emptyState();
@@ -1021,7 +1033,11 @@ export default function App() {
                   className="secondary"
                   onClick={() =>
                     ask(
-                      `I ate ${state.pending}. Prepare a food preview or ask for portion clarification.`,
+                      /^[iI] (ate|had|have eaten|just ate)\b/.test(
+                        state.pending,
+                      )
+                        ? state.pending
+                        : `I ate ${state.pending}`,
                     )
                   }
                 >

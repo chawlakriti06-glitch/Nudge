@@ -412,3 +412,33 @@ test("menu operations do not clutter chat and prior internal prompts are removed
   await expect(page.locator(".bubble.user")).toHaveCount(1);
   await expect(page.locator(".bubble.user")).toContainText("I want soup");
 });
+test("first-entry AI request asks portions without displaying internal instructions", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    s.pending = "eggs and bread";
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.route("**/api/chat", async (r) => {
+    expect(r.request().postDataJSON().message).toBe("I ate eggs and bread");
+    await r.fulfill({
+      json: {
+        message:
+          "How many eggs and slices of bread, and how were they prepared?",
+        kind: "message",
+        foods: [],
+        days: [],
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Estimate with AI" }).click();
+  await expect(page.locator(".bubble.user")).toHaveText("I ate eggs and bread");
+  await expect(page.locator(".chat-line .bubble.assistant")).toContainText(
+    "How many eggs",
+  );
+  await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
+});

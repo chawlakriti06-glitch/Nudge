@@ -389,7 +389,7 @@ export async function handleApi(
       });
     if (
       (parsed.kind === "message" && onlyMealLabel(parsed.message)) ||
-      (parsed.kind === "log" &&
+      (["log", "adjustment"].includes(parsed.kind) &&
         parsed.foods.some(
           (food) =>
             onlyMealLabel(food.name) ||

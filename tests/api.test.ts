@@ -858,3 +858,68 @@ test("Hinglish greetings get a real conversational reply without a nutrition sch
   expect(reply.kind).toBe("message");
   expect(reply.foods).toEqual([]);
 });
+test("a mislabeled craving gets a provider correction before exposing an adjustment", async () => {
+  let calls = 0;
+  const meal = {
+    slot: "Dinner",
+    name: "Dal and roti",
+    portion: "1 katori dal, 1 roti",
+    ingredients: ["lentils", "wheat"],
+    calories: 350,
+    protein: 15,
+    fibre: 7,
+    assumptions: "1 tsp oil included",
+  };
+  const response = await handleApi(
+    request({
+      message: "I'm craving one samosa, adjust dinner",
+      context: {
+        today: "2026-10-08",
+        weekday: "Thu",
+        profile: { meals: 3, diet: "vegetarian" },
+        plan: [{ day: "Thu", meals: [meal] }],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test-key" },
+    async (_url: string, init: RequestInit) => {
+      calls++;
+      if (calls === 2)
+        expect(
+          JSON.parse(init.body as string).generationConfig,
+        ).not.toHaveProperty("responseJsonSchema");
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      kind: "adjustment",
+                      message: "A samosa can fit with this proposed dinner",
+                      foods: [
+                        {
+                          name: calls === 1 ? "Breakfast" : "Samosa",
+                          portion:
+                            calls === 1 ? "Breakfast" : "1 medium fried samosa",
+                          calories: 250,
+                          protein: 5,
+                          fibre: 3,
+                          assumptions: "Typical recipe estimate",
+                        },
+                      ],
+                      adjustments: [{ day: "Thu", meal }],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(response.status).toBe(200);
+  expect((await response.json()).foods[0].name).toBe("Samosa");
+});

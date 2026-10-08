@@ -923,41 +923,37 @@ test("a mislabeled craving gets a provider correction before exposing an adjustm
   expect(response.status).toBe(200);
   expect((await response.json()).foods[0].name).toBe("Samosa");
 });
-test("English and Hinglish lunch questions request a plan change rather than a food preview", async () => {
+test("meal advice and short food choices remain conversation without logging or changing meals", async () => {
   for (const message of [
     "lunch mein kya khau?",
-    "what should i have for lunch now?",
+    "now what can i have for lunch?",
+    "chicken curry",
   ]) {
-    const meal = {
-      slot: "Lunch",
-      name: "Dal and roti",
-      portion: "1 katori dal, 2 rotis",
-      ingredients: ["dal", "wheat"],
-      calories: 450,
-      protein: 20,
-      fibre: 8,
-      assumptions: "1 tsp oil included",
-    };
     const r = await handleApi(
       request({
         message,
         context: {
-          today: "2026-10-08",
-          weekday: "Thu",
-          profile: { meals: 3 },
+          profile: { meals: 3, diet: "non-vegetarian" },
           eaten: 490,
           remaining: 1010,
-          plan: [{ day: "Thu", meals: [meal] }],
+          history: [
+            { role: "user", text: "now what can i have for lunch?" },
+            {
+              role: "assistant",
+              text: "For lunch, would you prefer chicken curry or dal with 2 rotis?",
+            },
+          ],
         },
       }),
       { NUDGE_GEMINI_API_KEY: "test-key" },
       async (_url: string, init: RequestInit) => {
         const payload = JSON.parse(init.body as string);
-        expect(
-          payload.generationConfig.responseJsonSchema.properties,
-        ).not.toHaveProperty("foods");
+        expect(payload.generationConfig).not.toHaveProperty(
+          "responseJsonSchema",
+        );
+        expect(payload.generationConfig).not.toHaveProperty("responseMimeType");
         expect(payload.systemInstruction.parts[0].text).toContain(
-          "remaining-meal planning request",
+          "not a report of consumption",
         );
         return new Response(
           JSON.stringify({
@@ -966,11 +962,7 @@ test("English and Hinglish lunch questions request a plan change rather than a f
                 content: {
                   parts: [
                     {
-                      text: JSON.stringify({
-                        kind: "adjustment",
-                        message: "Here's a lunch after your samosa",
-                        adjustments: [{ day: "Thu", meal }],
-                      }),
+                      text: "Try 1 katori chicken curry and 2 rotis, around 450 kcal depending on oil. Shall we review the remaining meals?",
                     },
                   ],
                 },
@@ -981,8 +973,56 @@ test("English and Hinglish lunch questions request a plan change rather than a f
       },
     );
     expect(r.status).toBe(200);
-    expect((await r.json()).foods).toEqual([]);
+    expect(await r.json()).toMatchObject({
+      kind: "message",
+      foods: [],
+      days: [],
+      adjustments: [],
+    });
   }
+});
+test("actual consumption after lunch advice still requests a validated food preview", async () => {
+  const r = await handleApi(
+    request({
+      message: "I ate chicken curry",
+      context: {
+        profile: { meals: 3 },
+        history: [
+          { role: "user", text: "what should I have for lunch?" },
+          { role: "assistant", text: "For lunch try chicken curry." },
+        ],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test-key" },
+    async (_url: string, init: RequestInit) => {
+      const payload = JSON.parse(init.body as string);
+      expect(payload.generationConfig.responseMimeType).toBe(
+        "application/json",
+      );
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      kind: "message",
+                      message: "How much curry did you eat?",
+                      foods: [],
+                      adjustments: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(r.status).toBe(200);
+  expect((await r.json()).message).toBe("How much curry did you eat?");
 });
 test("a post-log review requires both requested slots and never proposes logging the food again", async () => {
   for (const slots of [["Lunch", "Dinner"], ["Lunch"]]) {

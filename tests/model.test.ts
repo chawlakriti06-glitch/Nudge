@@ -118,3 +118,28 @@ describe("Nudge invariants", () => {
     ).toThrow();
   });
 });
+
+it("distinguishes Indian vegetarian, eggetarian, vegan and non-vegetarian diets", () => {
+  const meal = (name: string) => ({
+    name,
+    portion: "1 bowl",
+    ingredients: [name],
+  });
+  const base = { ...p, allergies: "None", dislikes: "" };
+  expect(
+    conflict(meal("Chicken stock"), { ...base, diet: "vegetarian" }),
+  ).toContain("vegetarian");
+  expect(
+    conflict(meal("Egg curry"), { ...base, diet: "vegetarian" }),
+  ).toContain("eggs");
+  expect(conflict(meal("Egg curry"), { ...base, diet: "eggetarian" })).toBe("");
+  expect(conflict(meal("Paneer"), { ...base, diet: "vegan" })).toContain(
+    "vegan",
+  );
+  expect(
+    conflict(meal("Rajma and roti"), { ...base, diet: "vegetarian" }),
+  ).toBe("");
+  expect(
+    conflict(meal("Chicken"), { ...base, preferences: "Non-vegetarian" }),
+  ).toBe("");
+});

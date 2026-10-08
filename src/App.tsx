@@ -1,3 +1,4 @@
+import { dietFor } from "./diet.js";
 import { readApiJson } from "./api";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -256,11 +257,30 @@ function ProfileForm({
           </label>
         </div>
         <label>
+          Dietary preference
+          <select
+            aria-label="Dietary preference"
+            value={dietFor(p)}
+            onChange={(e) => set("diet", e.target.value)}
+            required
+          >
+            <option value="">Choose your diet</option>
+            <option value="vegetarian">
+              Vegetarian (no meat, fish or eggs)
+            </option>
+            <option value="eggetarian">
+              Eggetarian (eggs, no meat or fish)
+            </option>
+            <option value="vegan">Vegan (no animal ingredients)</option>
+            <option value="non-vegetarian">Non-vegetarian</option>
+          </select>
+        </label>
+        <label>
           Food preferences
           <input
             value={p.preferences}
             onChange={(e) => set("preferences", e.target.value)}
-            placeholder="Vegetarian, Indian, quick lunches…"
+            placeholder="North Indian, South Indian, quick lunches…"
           />
         </label>
         <label>
@@ -1484,6 +1504,7 @@ export default function App() {
               ["Your goal", p?.goal],
               ["Meals per day", `${p?.meals} meals`],
               ["Daily calorie budget", `${p?.budget} kcal`],
+              ["Diet", p ? dietFor(p) || "Choose your diet" : ""],
               ["Food preferences", p?.preferences || "Add preferences"],
               ["Dislikes", p?.dislikes || "None"],
               ["Allergies", p?.allergies],

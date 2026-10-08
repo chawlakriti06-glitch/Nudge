@@ -328,7 +328,7 @@ test.each([3, 4])(
                   slots.map((slot) => [
                     slot,
                     {
-                      name: "Meal",
+                      name: `${day} meal`,
                       portion: "1 bowl",
                       ingredients: ["rice"],
                       calories: 300,
@@ -436,4 +436,65 @@ test("unhelpful labels stop after one correction and never log food", async () =
   expect(calls).toBe(2);
   expect(r.status).toBe(502);
   expect((await r.json()).error).toContain("Nothing was logged");
+});
+test("rejects meat in vegetarian drafts and repetitive weekly breakfasts", async () => {
+  for (const unsafe of ["chicken", "repetition"]) {
+    const days = Object.fromEntries(
+      ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => [
+        day,
+        {
+          meals: Object.fromEntries(
+            ["Breakfast", "Lunch", "Dinner"].map((slot) => [
+              slot,
+              {
+                name: unsafe === "repetition" ? "Poha" : `${day} ${slot}`,
+                portion: "1 katori (150 ml)",
+                ingredients: [
+                  unsafe === "chicken" && slot === "Lunch"
+                    ? "chicken stock"
+                    : "rice",
+                ],
+                calories: 300,
+                assumptions: "1 tsp oil included",
+              },
+            ]),
+          ),
+        },
+      ]),
+    );
+    const result = await handleApi(
+      request({
+        operation: "menu",
+        message: "Generate a complete seven-day menu",
+        context: { profile: { meals: 3, diet: "vegetarian" } },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test-key", NUDGE_GEMINI_MODEL: "gemini-test" },
+      async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                finishReason: "STOP",
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        kind: "plan",
+                        message: "Draft",
+                        foods: [],
+                        days,
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ),
+    );
+    expect(result.status).toBe(502);
+    expect((await result.json()).error).toContain(
+      unsafe === "chicken" ? "vegetarian" : "breakfasts",
+    );
+  }
 });

@@ -1,3 +1,4 @@
+import { dietConflict, type Diet } from "./diet.js";
 export type Profile = {
   name: string;
   height: number;
@@ -6,6 +7,7 @@ export type Profile = {
   goal: string;
   meals: 3 | 4;
   preferences: string;
+  diet?: Diet;
   dislikes: string;
   allergies: string;
   language: string;
@@ -157,17 +159,7 @@ export function conflict(
     if ((key ? aliases[key] : [r]).some((a) => text.includes(a)))
       return `Conflicts with ${r}`;
   }
-  if (
-    /vegetarian|vegan/i.test(p.preferences) &&
-    /chicken|beef|pork|fish|salmon|tuna|shrimp|prawn|meat/.test(text)
-  )
-    return "Conflicts with vegetarian preferences";
-  if (
-    /vegan/i.test(p.preferences) &&
-    /egg|milk|paneer|cheese|yogurt|butter|ghee|honey|cream/.test(text)
-  )
-    return "Conflicts with vegan preferences";
-  return "";
+  return dietConflict(meal, p);
 }
 export function validateResponse(raw: unknown, p: Profile) {
   if (!raw || typeof raw !== "object")

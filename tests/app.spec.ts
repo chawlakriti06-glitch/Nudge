@@ -40,6 +40,9 @@ test("manual onboarding retains welcome food, confirms once, reloads, edits and 
   await page.getByLabel("Message", { exact: true }).fill("I ate 2 samosas");
   await page.getByRole("button", { name: "Send message" }).click();
   await page.getByRole("button", { name: "No known allergies — None" }).click();
+  await page
+    .getByLabel("Dietary preference", { exact: true })
+    .selectOption("vegetarian");
   await page.getByLabel("Daily calorie budget (kcal)").fill("1800");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(

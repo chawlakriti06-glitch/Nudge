@@ -159,7 +159,15 @@ export async function handleApi(
   const intakeRequest = /^i\s+(?:ate|had|have eaten|just ate)\b/i.test(
     body.message,
   );
-  if (intakeRequest) responseSchema.properties.kind.enum = ["message", "log"];
+  if (intakeRequest && !fullWeekRequest) {
+    responseSchema.properties.kind.enum = ["message", "log"];
+    // Food estimates do not need the deeply nested weekly menu schema.
+    responseSchema.properties.days = {
+      type: "array",
+      items: string,
+      maxItems: 0,
+    };
+  }
   const portionRules = `Respond to the actual food question, never with just a meal label such as Breakfast. For consumption requests, ask a concise question about missing quantities/preparation with kind message and empty foods/days. For eggs and bread without quantities, ask how many eggs and bread slices, and how the eggs were cooked or whether butter/oil was added. Use earlier conversation to interpret answers such as '2 eggs and 1 slice'. Once portions are clear, return kind log with a preview of estimated nutrition; never save it. Do not guess an unspecified portion. A meal name alone is not an answer. ${repairAttempt ? "Your prior response was only a meal label. Correct it by asking the needed portion question or supplying a log preview if quantities are known." : ""}`;
   const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun, and every named meal property inside each day. Meal keys define the slots; do not output a meals array for this schema. Actual consumed food does not replace a planned meal slot.`;
   try {
@@ -180,7 +188,7 @@ export async function handleApi(
           systemInstruction: {
             parts: [
               {
-                text: `${instructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${menuRules}\n${portionRules}`,
+                text: `${instructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : "For food questions, return empty days. Focus on the portion and calorie question; do not generate a weekly menu."}\n${portionRules}`,
               },
             ],
           },
@@ -215,7 +223,7 @@ export async function handleApi(
         404: "The selected Gemini model is unavailable. Set NUDGE_GEMINI_MODEL to a currently available free-tier model in Google AI Studio.",
       };
       let detail = "";
-      if (upstream.status === 404) {
+      if ([400, 404].includes(upstream.status)) {
         try {
           const providerError = await upstream.json();
           if (typeof providerError.error?.message === "string") {
@@ -230,7 +238,7 @@ export async function handleApi(
         }
       }
       return json(502, {
-        error: `${upstream.status === 404 ? `Gemini returned 404 for model "${model}". ${detail ? `Google says: ${detail} ` : ""}Check /api/models for the names available to this key.` : errors[upstream.status] || `Gemini could not complete this request (${upstream.status}). Please retry later.`} Your saved data is unchanged. Manual logging still works.`,
+        error: `${upstream.status === 404 ? `Gemini returned 404 for model "${model}". ${detail ? `Google says: ${detail} ` : ""}Check /api/models for the names available to this key.` : upstream.status === 400 ? `Gemini rejected the request (400). ${detail ? `Google says: ${detail}` : "Check the model’s structured response support."}` : errors[upstream.status] || `Gemini could not complete this request (${upstream.status}). Please retry later.`} Your saved data is unchanged. Manual logging still works.`,
       });
     }
     const result = await upstream.json();

@@ -498,3 +498,61 @@ test("rejects meat in vegetarian drafts and repetitive weekly breakfasts", async
     );
   }
 });
+test("food estimates use a compact schema and omit full-week instructions", async () => {
+  const response = await handleApi(
+    request({
+      message: "i had 2 eggs and 1 bread toast. how many calories is that?",
+      context: { profile: { meals: 4, diet: "non-vegetarian" } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test-key" },
+    async (_url: string, init: RequestInit) => {
+      const sent = JSON.parse(init.body as string);
+      expect(sent.generationConfig.responseJsonSchema.properties.days).toEqual({
+        type: "array",
+        items: { type: "string" },
+        maxItems: 0,
+      });
+      expect(sent.systemInstruction.parts[0].text).not.toContain(
+        "Return the complete revised week. When the schema",
+      );
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      message:
+                        "How were the eggs cooked, and was butter added?",
+                      kind: "message",
+                      foods: [],
+                      days: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(response.status).toBe(200);
+});
+test("400 reports provider diagnosis while redacting the API key", async () => {
+  const response = await handleApi(
+    request(),
+    { NUDGE_GEMINI_API_KEY: "private-test-key" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "Schema too complex: private-test-key" },
+        }),
+        { status: 400 },
+      ),
+  );
+  const body = await response.json();
+  expect(body.error).toContain("Schema too complex");
+  expect(body.error).not.toContain("private-test-key");
+});

@@ -7,6 +7,8 @@ export function FoodIllustration({
   slot: string;
 }) {
   const text = name.toLowerCase();
+  const drink = /coffee|chai|tea|drink/.test(text);
+  const eggs = /egg/.test(text) && !/rice|roti|toast|bread/.test(text);
   const bread = /roti|chapati|paratha|toast|sandwich|chilla|dosa/.test(text);
   const idli = /idli/.test(text);
   const sweet = /yog|curd|fruit|pudding|dessert|chocolate|banana/.test(text);
@@ -37,7 +39,53 @@ export function FoodIllustration({
       <ellipse cx="180" cy="116" rx="119" ry="73" fill="#fbfaf5" />
       <ellipse cx="180" cy="112" rx="108" ry="64" fill="#dcded4" />
       <ellipse cx="180" cy="110" rx="100" ry="58" fill="#fffdf7" />
-      {bread ? (
+      {drink ? (
+        <g>
+          <path d="M122 85h106v53q-6 30-53 30q-47 0-53-30Z" fill="#54736e" />
+          <path
+            d="M226 98q45-8 38 25q-7 23-38 13"
+            fill="none"
+            stroke="#54736e"
+            strokeWidth="12"
+          />
+          <ellipse cx="175" cy="85" rx="53" ry="20" fill="#d4c2a5" />
+          <ellipse cx="175" cy="85" rx="45" ry="14" fill="#795642" />
+          <path
+            d="M160 64q-10-10 0-21m27 21q-10-10 0-21"
+            fill="none"
+            stroke="#b9c6b7"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+        </g>
+      ) : eggs ? (
+        <g>
+          <ellipse
+            cx="151"
+            cy="105"
+            rx="34"
+            ry="44"
+            fill="#f0e5ce"
+            transform="rotate(-18 151 105)"
+          />
+          <ellipse
+            cx="215"
+            cy="114"
+            rx="34"
+            ry="44"
+            fill="#fff7e6"
+            transform="rotate(19 215 114)"
+          />
+          <ellipse
+            cx="215"
+            cy="114"
+            rx="19"
+            ry="25"
+            fill="#e7b75b"
+            transform="rotate(19 215 114)"
+          />
+        </g>
+      ) : bread ? (
         <g>
           <ellipse
             cx="155"

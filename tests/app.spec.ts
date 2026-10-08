@@ -1918,3 +1918,47 @@ test("illustrated Home meals log their approved portions once and respect reduce
   });
   expect(state.plan[0].meals[0].approved).toBe(true);
 });
+
+test("Home food logs have illustrations while the planning card and saved intake stay unchanged", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    const d = new Date();
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    s.foods = [
+      {
+        id: "coffee",
+        date,
+        name: "Coffee",
+        portion: "1 cup",
+        calories: 35,
+        assumptions: "Estimate",
+      },
+    ];
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Plan my meals", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".food-log-illustration").getByRole("img")).toHaveCount(1);
+  await page.setViewportSize({ width: 320, height: 568 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Edit Coffee", exact: true }).click();
+  await expect(page.getByLabel("Portion", { exact: true })).toHaveValue(
+    "1 cup",
+  );
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  const state = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(state.foods).toHaveLength(1);
+  expect(state.foods[0].calories).toBe(35);
+  expect(state.plan).toEqual([]);
+});

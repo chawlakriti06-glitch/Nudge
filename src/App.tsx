@@ -1778,7 +1778,10 @@ export default function App() {
             .filter((f) => f.date === day)
             .map((f) => (
               <div className="dashboard-food" key={f.id}>
-                <div>
+                <div className="food-log-illustration">
+                  <FoodIllustration name={f.name} slot={f.menuSlot || "Food"} />
+                </div>
+                <div className="food-log-description">
                   <strong>{f.name}</strong>
                   <p>{f.portion}</p>
                 </div>

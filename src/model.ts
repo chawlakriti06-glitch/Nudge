@@ -13,6 +13,8 @@ export type Profile = {
   language: string;
   budget: number;
   cycle: boolean;
+  proteinTarget?: number;
+  fibreTarget?: number;
 };
 export type Food = {
   id: string;
@@ -20,6 +22,8 @@ export type Food = {
   name: string;
   portion: string;
   calories: number;
+  protein?: number | null;
+  fibre?: number | null;
   assumptions: string;
 };
 export type Meal = {
@@ -28,12 +32,18 @@ export type Meal = {
   portion: string;
   ingredients: string[];
   calories: number;
+  protein?: number | null;
+  fibre?: number | null;
   assumptions: string;
   approved: boolean;
 };
 export type Day = { day: string; meals: Meal[] };
 export type Proposal = {
-  kind: "log" | "plan";
+  kind: "log" | "plan" | "adjustment";
+  date?: string;
+  fromCraving?: boolean;
+  basis?: { intake: string; meal: string };
+  adjustments?: { day: string; meal: Meal }[];
   foods: Omit<Food, "id" | "date">[];
   days: Day[];
 };
@@ -70,7 +80,20 @@ export function totals(foods: Food[], budget: number, date = dateKey()) {
   const eaten = foods
     .filter((f) => f.date === date)
     .reduce((s, f) => s + f.calories, 0);
-  return { eaten, remaining: budget - eaten };
+  const today = foods.filter((f) => f.date === date);
+  const nutrient = (key: "protein" | "fibre") => ({
+    value: today.reduce(
+      (sum, f) => sum + (typeof f[key] === "number" ? f[key]! : 0),
+      0,
+    ),
+    unknown: today.filter((f) => typeof f[key] !== "number").length,
+  });
+  return {
+    eaten,
+    remaining: budget - eaten,
+    protein: nutrient("protein"),
+    fibre: nutrient("fibre"),
+  };
 }
 export function estimate(
   weight: number,
@@ -169,11 +192,12 @@ export function validateResponse(raw: unknown, p: Profile) {
     kind: unknown;
     foods: unknown;
     days: unknown;
+    adjustments?: unknown;
   };
   if (
     typeof r.message !== "string" ||
     r.message.length > 6000 ||
-    !["message", "log", "plan"].includes(String(r.kind)) ||
+    !["message", "log", "plan", "adjustment"].includes(String(r.kind)) ||
     !Array.isArray(r.foods) ||
     !Array.isArray(r.days)
   )
@@ -185,11 +209,13 @@ export function validateResponse(raw: unknown, p: Profile) {
       typeof f.name !== "string" ||
       typeof f.portion !== "string" ||
       typeof f.assumptions !== "string" ||
-      !number(f.calories)
+      !number(f.calories) ||
+      (f.protein != null && !number(f.protein)) ||
+      (f.fibre != null && !number(f.fibre))
     )
       throw Error("Invalid food estimate.");
   if (
-    r.kind === "log" &&
+    (r.kind === "log" || r.kind === "adjustment") &&
     r.foods.some(
       (f) =>
         !f.name.trim() ||
@@ -204,6 +230,37 @@ export function validateResponse(raw: unknown, p: Profile) {
     );
   if (r.kind === "log" && !r.foods.length)
     throw Error("Food preview is empty.");
+  if (r.kind === "adjustment") {
+    if (
+      !Array.isArray(r.adjustments) ||
+      r.adjustments.length !== 1 ||
+      !r.foods.length
+    )
+      throw Error(
+        "A meal adjustment must include one replacement and the food you are considering.",
+      );
+    const a = r.adjustments[0];
+    const m = a.meal;
+    if (
+      !days.includes(a.day) ||
+      !m ||
+      !slots(p.meals).includes(m.slot) ||
+      typeof m.name !== "string" ||
+      !m.name.trim() ||
+      typeof m.portion !== "string" ||
+      !m.portion.trim() ||
+      !Array.isArray(m.ingredients) ||
+      !m.ingredients.length ||
+      !m.ingredients.every((i: unknown) => typeof i === "string") ||
+      !number(m.calories) ||
+      typeof m.assumptions !== "string" ||
+      (m.protein != null && !number(m.protein)) ||
+      (m.fibre != null && !number(m.fibre))
+    )
+      throw Error("The proposed meal is incomplete. Your plan is unchanged.");
+    const error = conflict(m, p);
+    if (error) throw Error(`${error}. Your plan is unchanged.`);
+  }
   if (r.kind === "plan") {
     if (r.days.length !== 7 || new Set(r.days.map((d) => d.day)).size !== 7)
       throw Error("A complete seven-day menu is required.");
@@ -223,7 +280,9 @@ export function validateResponse(raw: unknown, p: Profile) {
           !Array.isArray(m.ingredients) ||
           !m.ingredients.length ||
           !m.ingredients.every((x: unknown) => typeof x === "string") ||
-          !number(m.calories)
+          !number(m.calories) ||
+          (m.protein != null && !number(m.protein)) ||
+          (m.fibre != null && !number(m.fibre))
         )
           throw Error("Invalid meal details.");
         const error = conflict(m, p);
@@ -233,7 +292,8 @@ export function validateResponse(raw: unknown, p: Profile) {
   }
   return {
     message: r.message,
-    kind: r.kind as "message" | "log" | "plan",
+    kind: r.kind as "message" | "log" | "plan" | "adjustment",
+    adjustments: (r.adjustments || []) as NonNullable<Proposal["adjustments"]>,
     foods: r.foods as Proposal["foods"],
     days: days
       .filter((day) => (r.days as Day[]).some((d) => d.day === day))

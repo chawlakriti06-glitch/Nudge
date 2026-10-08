@@ -26,7 +26,7 @@ The web app runs on port 5174; Vite proxies `/api` to the loopback API on port 3
 
 The app now uses Google's Gemini API only. There is no OpenAI call or automatic paid-provider fallback. Create a key at https://aistudio.google.com/apikey for a project shown as **Free tier**. Do not enable billing or upgrade that project if you want to avoid paid API usage. Free-tier eligibility, available models and quotas depend on Google's current rules and your region. Hosting limits are separate.
 
-Set server-only `NUDGE_GEMINI_API_KEY`. Optional `NUDGE_GEMINI_MODEL` defaults to `gemini-2.5-flash-lite`; verify that this model is currently available on your project's free tier, or select another compatible free-tier Gemini model supporting structured JSON output. Old `NUDGE_API_KEY` / `NUDGE_MODEL` variables are ignored, so an OpenAI key is never sent to Google. You may remove the old variables from Netlify. `.env.example` contains placeholders only and `.env` is ignored. Never use `VITE_` prefixes for keys.
+Set server-only `NUDGE_GEMINI_API_KEY`. Optional `NUDGE_GEMINI_MODEL` defaults to `gemini-3.5-flash-lite`; verify that this model is currently available on your project's free tier, or select another compatible free-tier Gemini model supporting structured JSON output. Old `NUDGE_API_KEY` / `NUDGE_MODEL` variables are ignored, so an OpenAI key is never sent to Google. You may remove the old variables from Netlify. `.env.example` contains placeholders only and `.env` is ignored. Never use `VITE_` prefixes for keys.
 
 For Netlify: open Environment variables, add `NUDGE_GEMINI_API_KEY` with a Production value, mark it secret, and include the Functions scope (All scopes is also compatible). Optionally add `NUDGE_GEMINI_MODEL`. Save and trigger a production redeploy. Refresh Nudge and request a weekly menu. A missing key returns a clear setup error; a 429 explains the free-tier limit and keeps manual logging available. The code does not upgrade billing or switch providers.
 
@@ -44,7 +44,7 @@ Nutrition amounts are estimates, with user-entered label/source notes or AI-visi
 
 ## Local data
 
-Profile, logs, chats, saved plans and unconfirmed proposals use durable browser localStorage under `nudge.local.v1`. There is no login, database or sync. Dates use the user's local timezone. Approval never counts as intake, and steps never change food budget. Reload retains data; clearing browser storage removes it. Delete my data clears Nudge only, preserving Trace's separate keys. Privacy information in the app explains relevant context transmission for online AI and browser speech services. Speech recognition is used only if available and permitted; typing is the fallback, never a demo recording.
+Profile, logs, chats, saved plans and unconfirmed proposals use durable browser localStorage under `nudge.local.v1`. There is no login, database or sync. Dates use the user's local timezone. Approval never counts as intake. The home screen shows calories, protein and fibre from confirmed food logs, with editable protein/fibre targets. Older logs with missing nutrient values are marked incomplete rather than treated as known zero. Reload retains data; clearing browser storage removes it. Delete my data clears Nudge only, preserving Trace's separate keys. Privacy information in the app explains relevant context transmission for online AI and browser speech services. Speech recognition is used only if available and permitted; typing is the fallback, never a demo recording.
 
 ## Verify
 
@@ -70,3 +70,10 @@ This repository now includes Vercel Node API functions in `api/` for `/api/chat`
 4. Keep your old Netlify site until you are satisfied with the Vercel deployment. A different site address has separate browser localStorage: existing Netlify data does **not** automatically appear on Vercel. Do not delete the old site's browser data.
 
 The migration configuration was tested locally; Vercel account access, production deployment and live Gemini calls still require user setup. Free hosting has limits and eligibility rules; check Vercel's current Hobby-plan terms before publishing. A Hobby deployment does not require a paid upgrade for this configuration.
+
+
+### Conversational intake and cravings
+
+Chat sends the confirmed logs for the local day, approved menu, remaining calories, nutrient totals, recent conversation and current preview to Gemini. Actual consumption returns a preview; confirmation alone adds it to the ledger. A craving can return one proposed replacement for today's dinner with Approve/Reject. Approval changes only that meal; a separate “I ate it” confirmation logs the craving. Proposals from a different date or with changed intake/menu are rejected. Manual logging, editing, deletion and undo update all three indicators.
+
+Gemini schema errors receive one retry using JSON mode on the same configured model, with output validation retained. Free-tier rate limits are not retried with a paid provider. Network, quota and provider availability errors still need a connected, configured provider; manual logging remains available. Test fixtures do not establish live-provider availability.

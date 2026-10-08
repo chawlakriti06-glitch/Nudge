@@ -1074,3 +1074,38 @@ input::placeholder {
     transition: none;
   }
 }
+
+.calorie-panel {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.intake-indicator {
+  text-align: center;
+  min-width: 0;
+}
+.intake-indicator .ring {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  max-width: 145px;
+}
+.intake-indicator .ring strong {
+  font-size: clamp(18px, 5vw, 26px);
+}
+.intake-indicator .ring span {
+  font-size: 10px;
+}
+.intake-indicator > strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.intake-indicator > small {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  color: #65778c;
+}
+.calorie-panel .remaining {
+  grid-column: 1 / -1;
+}

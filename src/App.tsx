@@ -10,7 +10,6 @@ import {
   ChevronDown,
   Check,
   Plus,
-  Footprints,
   Bell,
   ArrowLeft,
   Trash2,
@@ -20,6 +19,7 @@ import {
 import {
   conflict,
   dateKey,
+  days,
   emptyState,
   estimate,
   totals,
@@ -44,6 +44,8 @@ const initialProfile: Profile = {
   language: "English",
   budget: 0,
   cycle: false,
+  proteinTarget: 60,
+  fibreTarget: 25,
 };
 const uid = () => crypto.randomUUID();
 const internalMenuPrompt = (text: string) =>
@@ -431,6 +433,44 @@ function ProfileForm({
             )}
           </div>
         )}
+        <div className="two-col">
+          <label>
+            Daily protein target (g)
+            <input
+              type="number"
+              min="1"
+              max="500"
+              value={p.proteinTarget ?? 60}
+              onChange={(e) =>
+                set(
+                  "proteinTarget",
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
+              required
+            />
+          </label>
+          <label>
+            Daily fibre target (g)
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={p.fibreTarget ?? 25}
+              onChange={(e) =>
+                set(
+                  "fibreTarget",
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
+              required
+            />
+          </label>
+        </div>
+        <small>
+          Editable starting targets: 60 g protein and 25 g fibre. Choose targets
+          that suit you.
+        </small>
         <label>
           Daily calorie budget (kcal)
           <input
@@ -443,7 +483,9 @@ function ProfileForm({
             placeholder="Enter a budget you choose"
           />
         </label>
-        <small>Editable anytime. Steps do not increase this budget.</small>
+        <small>
+          Editable anytime. Only confirmed food counts toward intake.
+        </small>
         {error && (
           <p role="alert" className="error">
             {error}
@@ -453,6 +495,61 @@ function ProfileForm({
           {profile.budget ? "Save changes" : "Continue"} <ArrowUp size={17} />
         </button>
       </form>
+    </div>
+  );
+}
+function IntakeRing({
+  label,
+  title,
+  value,
+  target,
+  unit,
+  unknown = 0,
+}: {
+  label: string;
+  title: string;
+  value: number;
+  target: number;
+  unit: string;
+  unknown?: number;
+}) {
+  const progress = Math.min(100, Math.max(0, (value / (target || 1)) * 100));
+  return (
+    <div className="intake-indicator">
+      <div
+        className="ring"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+        aria-valuetext={`${value} of ${target} ${unit}${unknown ? `; ${unknown} entries missing nutrition` : ""}`}
+      >
+        <svg className="calorie-ring" viewBox="0 0 145 145" aria-hidden="true">
+          <circle className="calorie-track" cx="72.5" cy="72.5" r="67" />
+          <circle
+            className="calorie-progress"
+            cx="72.5"
+            cy="72.5"
+            r="67"
+            pathLength="100"
+            strokeDasharray="100"
+            strokeDashoffset={100 - progress}
+          />
+        </svg>
+        <div>
+          <strong>{Math.round(value * 10) / 10}</strong>
+          <span>
+            / {target} {unit}
+          </span>
+        </div>
+      </div>
+      <strong>{title}</strong>
+      <small>
+        {unknown
+          ? `Known total · ${unknown} ${unknown === 1 ? "entry" : "entries"} missing data`
+          : "eaten · estimated"}
+      </small>
     </div>
   );
 }
@@ -482,6 +579,8 @@ export default function App() {
     name: "",
     portion: "",
     calories: "",
+    protein: "",
+    fibre: "",
     assumptions: "User-entered nutrition estimate",
   });
   const [editId, setEditId] = useState("");
@@ -489,8 +588,6 @@ export default function App() {
   const [openDay, setOpenDay] = useState("Mon");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [privacy, setPrivacy] = useState(false);
-  const [stepEdit, setStepEdit] = useState(false);
-  const [stepValue, setStepValue] = useState("");
   const [mealEdit, setMealEdit] = useState<{
     day: string;
     index: number;
@@ -501,6 +598,7 @@ export default function App() {
   const [day, setDay] = useState(dateKey());
   const lock = useRef(false);
   const requestEpoch = useRef(0);
+  const aiSucceeded = useRef(false);
   const recognition = useRef<any>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const draftStart = useRef<HTMLDivElement>(null);
@@ -529,8 +627,12 @@ export default function App() {
   useEffect(() => {
     fetch("/api/status")
       .then((r) => r.json())
-      .then((d) => setAi(d.configured === true))
-      .catch(() => setAi(false));
+      .then((d) => {
+        if (!aiSucceeded.current) setAi(d.configured === true);
+      })
+      .catch(() => {
+        if (!aiSucceeded.current) setAi(false);
+      });
     const timer = setInterval(() => setDay(dateKey()), 10000);
     return () => clearInterval(timer);
   }, []);
@@ -542,8 +644,7 @@ export default function App() {
     setState((s) => ({ ...s, proposal }));
   }, [proposal]);
   useEffect(() => {
-    if (!(manual || ledger || privacy || deleteConfirm || stepEdit || mealEdit))
-      return;
+    if (!(manual || ledger || privacy || deleteConfirm || mealEdit)) return;
     const previous = document.activeElement as HTMLElement | null;
     const modal = document.querySelector<HTMLElement>(".modal");
     const controls = () =>
@@ -559,7 +660,6 @@ export default function App() {
         setLedger(false);
         setPrivacy(false);
         setDeleteConfirm(false);
-        setStepEdit(false);
         setMealEdit(null);
       }
       if (e.key === "Tab") {
@@ -580,7 +680,7 @@ export default function App() {
       document.removeEventListener("keydown", handler);
       previous?.focus();
     };
-  }, [manual, ledger, privacy, deleteConfirm, stepEdit, !!mealEdit]);
+  }, [manual, ledger, privacy, deleteConfirm, !!mealEdit]);
   const p = state.profile;
   const t = totals(state.foods, p?.budget || 0, day);
   const paused = state.paused === day;
@@ -610,6 +710,7 @@ export default function App() {
     }
     setError("");
     if (source === "chat") {
+      setProposal(null);
       setText("");
       setState((s) => ({
         ...s,
@@ -631,12 +732,21 @@ export default function App() {
               weight: undefined,
             },
             today: day,
+            weekday: days[(new Date().getDay() + 6) % 7],
+            foodLogs: state.foods.filter((f) => f.date === day),
+            nutrients: { protein: t.protein, fibre: t.fibre },
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             eaten: t.eaten,
             remaining: t.remaining,
             paused,
-            plan: state.draft.length ? state.draft : state.plan,
-            history: state.chat.slice(-6),
+            plan:
+              source === "chat"
+                ? state.plan
+                : state.draft.length
+                  ? state.draft
+                  : state.plan,
+            history: state.chat.slice(-12),
+            currentPreview: proposal,
           },
         }),
         signal: AbortSignal.timeout(65000),
@@ -645,7 +755,13 @@ export default function App() {
       if (epoch !== requestEpoch.current) return;
       if (!response.ok) throw Error(raw.error || "AI is unavailable.");
       const result = validateResponse(raw, p);
-      if (/^i\s+want\b/i.test(message) && result.kind === "log")
+      if (
+        /\b(craving|wish to eat|want to eat|thinking of eating)\b/i.test(
+          message,
+        ) &&
+        !/\b(ate|eaten|had)\b/i.test(message) &&
+        result.kind === "log"
+      )
         throw Error(
           "A planning request cannot be logged as intake. Please retry.",
         );
@@ -694,15 +810,42 @@ export default function App() {
       } else if (result.kind !== "message")
         setProposal({
           kind: result.kind,
+          date: day,
+          adjustments: result.adjustments,
+          basis:
+            result.kind === "adjustment"
+              ? {
+                  intake: JSON.stringify(
+                    state.foods.filter((f) => f.date === day),
+                  ),
+                  meal: JSON.stringify(
+                    state.plan
+                      .find((d) => d.day === result.adjustments[0]?.day)
+                      ?.meals.find(
+                        (m) => m.slot === result.adjustments[0]?.meal.slot,
+                      ),
+                  ),
+                }
+              : undefined,
           foods: result.foods,
           days: result.days.map((d) => ({
             ...d,
             meals: d.meals.map((m) => ({ ...m, approved: false })),
           })),
         });
+      aiSucceeded.current = true;
       setAi(true);
     } catch (e) {
-      if (epoch === requestEpoch.current) setError((e as Error).message);
+      if (epoch === requestEpoch.current) {
+        const failure = e as Error;
+        setError(
+          ["TimeoutError", "AbortError"].includes(failure.name)
+            ? "The AI response took too long. Retry, or log manually; nothing was changed."
+            : /failed to fetch|networkerror|load failed/i.test(failure.message)
+              ? "Couldn't reach the AI service. Check your connection and retry; your saved food and menu are unchanged."
+              : failure.message,
+        );
+      }
     } finally {
       if (epoch === requestEpoch.current) {
         setBusy(false);
@@ -809,6 +952,18 @@ export default function App() {
       setError("Enter a food, portion, and valid calorie estimate.");
       return;
     }
+    if (
+      [food.protein, food.fibre].some(
+        (v) =>
+          v !== "" &&
+          (!Number.isFinite(Number(v)) || Number(v) < 0 || Number(v) > 1000),
+      )
+    ) {
+      setError(
+        "Enter valid protein and fibre grams, or leave them blank if unknown.",
+      );
+      return;
+    }
     setUndo(state.foods);
     const item: Food = {
       id: editId || uid(),
@@ -816,6 +971,8 @@ export default function App() {
       name: food.name.trim(),
       portion: food.portion.trim(),
       calories: Number(food.calories),
+      protein: food.protein === "" ? null : Number(food.protein),
+      fibre: food.fibre === "" ? null : Number(food.fibre),
       assumptions: food.assumptions,
     };
     update({
@@ -837,12 +994,16 @@ export default function App() {
             name: f.name,
             portion: f.portion,
             calories: String(f.calories),
+            protein: f.protein == null ? "" : String(f.protein),
+            fibre: f.fibre == null ? "" : String(f.fibre),
             assumptions: f.assumptions,
           }
         : {
             name: state.pending,
             portion: "",
             calories: "",
+            protein: "",
+            fibre: "",
             assumptions: "User-entered nutrition estimate",
           },
     );
@@ -850,6 +1011,69 @@ export default function App() {
   };
   const accept = () => {
     if (!proposal) return;
+    if (proposal.date && proposal.date !== day) {
+      setProposal(null);
+      setError(
+        "This preview is from another day. Ask again for today's intake and menu.",
+      );
+      return;
+    }
+    if (proposal.kind === "adjustment") {
+      try {
+        validateResponse({ ...proposal, message: "Meal adjustment" }, p!);
+        const a = proposal.adjustments![0];
+        const weekday = days[(new Date().getDay() + 6) % 7];
+        const current = state.plan
+          .find((d) => d.day === weekday)
+          ?.meals.find((m) => m.slot === a.meal.slot);
+        if (a.day !== weekday || !current)
+          throw Error(
+            "This adjustment no longer matches today's saved menu. Ask again.",
+          );
+        if (
+          proposal.basis &&
+          (proposal.basis.intake !==
+            JSON.stringify(state.foods.filter((f) => f.date === day)) ||
+            proposal.basis.meal !== JSON.stringify(current))
+        )
+          throw Error(
+            "Your intake or menu changed since this suggestion. Ask again for an updated adjustment.",
+          );
+        update({
+          draft: state.draft.map((d) =>
+            d.day !== a.day
+              ? d
+              : {
+                  ...d,
+                  meals: d.meals.map((m) =>
+                    m.slot === a.meal.slot ? { ...a.meal, approved: false } : m,
+                  ),
+                },
+          ),
+          plan: state.plan.map((d) =>
+            d.day !== a.day
+              ? d
+              : {
+                  ...d,
+                  meals: d.meals.map((m) =>
+                    m.slot === a.meal.slot ? { ...a.meal, approved: true } : m,
+                  ),
+                },
+          ),
+        });
+        setProposal({
+          kind: "log",
+          fromCraving: true,
+          date: day,
+          foods: proposal.foods,
+          days: [],
+        });
+        setError("");
+      } catch (e) {
+        setError((e as Error).message);
+      }
+      return;
+    }
     if (proposal.kind === "log") {
       try {
         validateResponse({ ...proposal, message: "Food preview" }, p!);
@@ -1072,61 +1296,29 @@ export default function App() {
             <p className="subtitle">Let’s make your next meal easy.</p>
           </div>
           <section className="calorie-panel">
-            <div
-              className="ring"
-              role="progressbar"
-              aria-label="Daily calorie intake"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.min(
-                100,
-                Math.max(0, (t.eaten / (p?.budget || 1)) * 100),
-              )}
-              aria-valuetext={`${t.eaten} of ${p?.budget} kcal eaten${t.remaining < 0 ? `; ${-t.remaining} kcal over budget` : ""}`}
-            >
-              <svg
-                className="calorie-ring"
-                viewBox="0 0 145 145"
-                aria-hidden="true"
-              >
-                <circle className="calorie-track" cx="72.5" cy="72.5" r="67" />
-                <circle
-                  className="calorie-progress"
-                  cx="72.5"
-                  cy="72.5"
-                  r="67"
-                  pathLength="100"
-                  strokeDasharray="100"
-                  strokeDashoffset={
-                    100 -
-                    Math.min(
-                      100,
-                      Math.max(0, (t.eaten / (p?.budget || 1)) * 100),
-                    )
-                  }
-                />
-              </svg>
-              <div>
-                <strong>{t.eaten.toLocaleString()}</strong>
-                <span>/ {p?.budget.toLocaleString()} kcal</span>
-                <small>eaten · estimated</small>
-              </div>
-            </div>
-            <div className="step-panel">
-              <Footprints color="#FF784F" size={29} />
-              <strong>{state.steps[day]?.toLocaleString() ?? "—"}</strong>
-              <span>Steps</span>
-              <button
-                className="text-button"
-                onClick={() => {
-                  setStepValue(String(state.steps[day] || ""));
-                  setStepEdit(true);
-                }}
-              >
-                {state.steps[day] === undefined ? "Add manually" : "Edit steps"}
-              </button>
-              <small>No device connected</small>
-            </div>
+            <IntakeRing
+              label="Daily calorie intake"
+              title="Calories"
+              value={t.eaten}
+              target={p?.budget || 0}
+              unit="kcal"
+            />
+            <IntakeRing
+              label="Daily protein intake"
+              title="Protein"
+              value={t.protein.value}
+              target={p?.proteinTarget || 60}
+              unit="g"
+              unknown={t.protein.unknown}
+            />
+            <IntakeRing
+              label="Daily fibre intake"
+              title="Fibre"
+              value={t.fibre.value}
+              target={p?.fibreTarget || 25}
+              unit="g"
+              unknown={t.fibre.unknown}
+            />
             <div className="remaining">
               <span>
                 {t.remaining < 0
@@ -1215,7 +1407,9 @@ export default function App() {
               <h2>
                 {proposal.kind === "log"
                   ? "Count this as eaten?"
-                  : "Your plan, revised."}
+                  : proposal.kind === "adjustment"
+                    ? "Make room for your craving?"
+                    : "Your plan, revised."}
               </h2>
               {proposal.kind === "log" ? (
                 proposal.foods.map((f, i) => (
@@ -1224,9 +1418,51 @@ export default function App() {
                       {f.name} <span>{f.calories} kcal est.</span>
                     </strong>
                     <p>{f.portion}</p>
+                    <small>
+                      {f.protein ?? "unknown"} g protein ·{" "}
+                      {f.fibre ?? "unknown"} g fibre
+                    </small>
                     <small>{f.assumptions}</small>
                   </div>
                 ))
+              ) : proposal.kind === "adjustment" ? (
+                <>
+                  <p>
+                    Considering:{" "}
+                    {proposal.foods
+                      .map(
+                        (f) =>
+                          `${f.portion} ${f.name} (${f.calories} kcal estimated)`,
+                      )
+                      .join(", ")}
+                  </p>
+                  {proposal.adjustments?.map((a) => (
+                    <div className="preview-food" key={a.meal.slot}>
+                      <strong>
+                        Today's revised {a.meal.slot.toLowerCase()}:{" "}
+                        {a.meal.name}
+                      </strong>
+                      <p>{a.meal.portion}</p>
+                      <small>
+                        {a.meal.calories} kcal · {a.meal.protein ?? "unknown"} g
+                        protein · {a.meal.fibre ?? "unknown"} g fibre
+                      </small>
+                      <p>{a.meal.assumptions}</p>
+                    </div>
+                  ))}
+                  <p>
+                    {Math.round(
+                      t.remaining -
+                        proposal.foods.reduce((sum, f) => sum + f.calories, 0),
+                    )}{" "}
+                    kcal would remain after this craving. The revised meal is
+                    planned, not eaten.
+                  </p>
+                  <small>
+                    Approve changes only this meal. The craving counts only when
+                    you confirm eating it.
+                  </small>
+                </>
               ) : (
                 <>
                   <p>
@@ -1241,11 +1477,21 @@ export default function App() {
               <div className="actions">
                 <button className="primary" onClick={accept}>
                   {proposal.kind === "log"
-                    ? "Confirm & log"
-                    : "Review revised draft"}{" "}
+                    ? proposal.fromCraving
+                      ? "I ate it — log food"
+                      : "Confirm & log"
+                    : proposal.kind === "adjustment"
+                      ? `Approve ${proposal.adjustments?.[0].meal.slot.toLowerCase() || "meal"} adjustment`
+                      : "Review revised draft"}{" "}
                   <Check size={17} />
                 </button>
-                <button onClick={() => setProposal(null)}>Keep my plan</button>
+                <button onClick={() => setProposal(null)}>
+                  {proposal.kind === "adjustment"
+                    ? "Reject adjustment"
+                    : proposal.kind === "log"
+                      ? "Dismiss preview"
+                      : "Keep my plan"}
+                </button>
                 {proposal.kind === "log" && (
                   <button
                     onClick={() => {
@@ -1258,6 +1504,22 @@ export default function App() {
                         calories: String(
                           proposal.foods.reduce((s, f) => s + f.calories, 0),
                         ),
+                        protein: proposal.foods.some((f) => f.protein == null)
+                          ? ""
+                          : String(
+                              proposal.foods.reduce(
+                                (sum, f) => sum + (f.protein || 0),
+                                0,
+                              ),
+                            ),
+                        fibre: proposal.foods.some((f) => f.fibre == null)
+                          ? ""
+                          : String(
+                              proposal.foods.reduce(
+                                (sum, f) => sum + (f.fibre || 0),
+                                0,
+                              ),
+                            ),
                         assumptions: proposal.foods
                           .map((f) => f.assumptions)
                           .join("; "),
@@ -1371,8 +1633,9 @@ export default function App() {
                 preferences, not the other way around.
               </p>
               <small>
-                AI setup is required to generate a menu. You can still log food
-                manually on Home.
+                {ai
+                  ? "Create your draft, then review it before saving."
+                  : "AI isn't connected yet. You can still log food manually in Chat."}
               </small>
             </div>
           )}
@@ -1552,6 +1815,12 @@ export default function App() {
               </button>
             ))}
           </div>
+          <button className="settings-row" onClick={() => setEditing(true)}>
+            <strong>Protein / fibre targets</strong>
+            <span>
+              {p?.proteinTarget ?? 60} g / {p?.fibreTarget ?? 25} g ›
+            </span>
+          </button>
           <h3 className="section-label">MAKE IT YOURS</h3>
           <div className="settings-card">
             <div className="settings-row">
@@ -1630,12 +1899,7 @@ export default function App() {
           </button>
         ))}
       </nav>
-      {(manual ||
-        ledger ||
-        privacy ||
-        deleteConfirm ||
-        stepEdit ||
-        mealEdit) && (
+      {(manual || ledger || privacy || deleteConfirm || mealEdit) && (
         <div
           className="overlay"
           onClick={() => {
@@ -1643,7 +1907,6 @@ export default function App() {
             setLedger(false);
             setPrivacy(false);
             setDeleteConfirm(false);
-            setStepEdit(false);
             setMealEdit(null);
           }}
         >
@@ -1670,7 +1933,6 @@ export default function App() {
                 setLedger(false);
                 setPrivacy(false);
                 setDeleteConfirm(false);
-                setStepEdit(false);
                 setMealEdit(null);
               }}
             >
@@ -1724,6 +1986,40 @@ export default function App() {
                       }
                     />
                   </label>
+                  <div className="two-col">
+                    <label>
+                      Protein (g)
+                      <input
+                        type="number"
+                        min="0"
+                        max="1000"
+                        step="any"
+                        value={food.protein}
+                        placeholder="Unknown"
+                        onChange={(e) =>
+                          setFood({ ...food, protein: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Fibre (g)
+                      <input
+                        type="number"
+                        min="0"
+                        max="1000"
+                        step="any"
+                        value={food.fibre}
+                        placeholder="Unknown"
+                        onChange={(e) =>
+                          setFood({ ...food, fibre: e.target.value })
+                        }
+                      />
+                    </label>
+                  </div>
+                  <small>
+                    Leave blank if unknown. Missing values are flagged in
+                    today's totals.
+                  </small>
                   <label>
                     Source / assumptions
                     <input
@@ -1781,6 +2077,10 @@ export default function App() {
                         <span>{f.calories} kcal</span>
                       </strong>
                       <p>{f.portion}</p>
+                      <small>
+                        {f.protein ?? "unknown"} g protein ·{" "}
+                        {f.fibre ?? "unknown"} g fibre
+                      </small>
                       <small>{f.assumptions}</small>
                       <div className="actions">
                         <button
@@ -1815,10 +2115,11 @@ export default function App() {
                   browser storage removes them.
                 </p>
                 <p>
-                  AI is online: your message, dietary preferences, budget,
-                  current plan and the last few messages are sent through our
-                  server to Google Gemini. Height, weight and your name are
-                  omitted from chat context.
+                  AI is online: your message, dietary preferences, calorie and
+                  nutrient targets, today's confirmed food logs, current plan,
+                  preview and recent messages are sent through our server to
+                  Google Gemini. Height, weight and your name are omitted from
+                  chat context.
                 </p>
                 <p>
                   Our server does not persist these payloads or log them
@@ -1866,39 +2167,6 @@ export default function App() {
                 >
                   Keep my data
                 </button>
-              </>
-            )}
-            {stepEdit && (
-              <>
-                <h2>Your steps today</h2>
-                <p>
-                  Manual entry. No device connection, and no automatic extra
-                  food calories.
-                </p>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (Number(stepValue) >= 0 && Number(stepValue) <= 100000) {
-                      update({
-                        steps: { ...state.steps, [day]: Number(stepValue) },
-                      });
-                      setStepEdit(false);
-                    }
-                  }}
-                >
-                  <label>
-                    Steps
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      max="100000"
-                      value={stepValue}
-                      onChange={(e) => setStepValue(e.target.value)}
-                    />
-                  </label>
-                  <button className="primary">Save steps</button>
-                </form>
               </>
             )}
             {mealEdit && (

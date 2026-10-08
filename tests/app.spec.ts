@@ -288,7 +288,7 @@ test("confirmed AI preview is durable and applies once", async ({ page }) => {
   await page.reload();
   await expect(page.getByText("1,300 kcal remaining")).toBeVisible();
 });
-test("different days, steps and undo recalculate independently", async ({
+test("different days, nutrient totals and undo recalculate independently", async ({
   page,
 }) => {
   await seed(page);
@@ -303,10 +303,12 @@ test("different days, steps and undo recalculate independently", async ({
   await page.getByLabel("Ledger date").fill("2026-01-01");
   await expect(page.getByText("130 kcal eaten · estimated")).toBeVisible();
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await page.getByRole("button", { name: "Add manually", exact: true }).click();
-  await page.getByLabel("Steps", { exact: true }).fill("6420");
-  await page.getByRole("button", { name: "Save steps" }).click();
-  await expect(page.getByText("6,420", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Daily protein intake" }),
+  ).toHaveAttribute("aria-valuenow", "0");
+  await expect(
+    page.getByRole("progressbar", { name: "Daily fibre intake" }),
+  ).toHaveAttribute("aria-valuenow", "0");
   await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await page.getByRole("button", { name: "Open food ledger" }).click();
@@ -377,7 +379,7 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
 }) => {
   await seed(page);
   const ring = page.getByRole("progressbar", { name: "Daily calorie intake" });
-  const arc = page.locator(".calorie-progress");
+  const arc = ring.locator(".calorie-progress");
   await expect(ring).toHaveAttribute("aria-valuenow", "0");
   await expect(arc).toHaveAttribute("stroke-dashoffset", "100");
   await page.getByRole("button", { name: "Log manually" }).click();
@@ -534,4 +536,258 @@ test("Swap previews an alternative beside the meal and preserves other meals and
   );
   expect(saved.plan[0].meals[1].name).toBe("Original Lunch");
   expect(saved.foods).toHaveLength(0);
+});
+test("craving approval changes only today's dinner and confirmation updates three intake rings", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("nutritionFixture")) return;
+    sessionStorage.setItem("nutritionFixture", "yes");
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    const day = new Date();
+    const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    s.foods = [
+      {
+        id: "earlier",
+        date,
+        name: "Dal and rice",
+        portion: "Two meals",
+        calories: 1000,
+        protein: 30,
+        fibre: 10,
+        assumptions: "Test fixture",
+      },
+    ];
+    s.plan = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+      day,
+      meals: ["Breakfast", "Lunch", "Dinner"].map((slot) => ({
+        slot,
+        name: "Original dal meal",
+        portion: "1 bowl",
+        ingredients: ["lentils"],
+        calories: 600,
+        protein: 20,
+        fibre: 8,
+        assumptions: "Test fixture",
+        approved: true,
+      })),
+    }));
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.route("**/api/chat", async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.context.foodLogs).toHaveLength(1);
+    expect(body.context.eaten).toBe(1000);
+    expect(body.context.remaining).toBe(800);
+    expect(body.context.nutrients.protein.value).toBe(30);
+    await route.fulfill({
+      json: {
+        message:
+          "One medium samosa is about 250 kcal. Here's a lighter dinner.",
+        kind: "adjustment",
+        days: [],
+        foods: [
+          {
+            name: "Samosa",
+            portion: "1 medium samosa",
+            calories: 250,
+            protein: 5,
+            fibre: 3,
+            assumptions: "Fried, approximate portion",
+          },
+        ],
+        adjustments: [
+          {
+            day: body.context.weekday,
+            meal: {
+              slot: "Dinner",
+              name: "Dal, sabzi and roti",
+              portion: "1 katori dal, 1 katori sabzi, 1 roti",
+              ingredients: ["lentils", "vegetables", "wheat", "oil"],
+              calories: 500,
+              protein: 18,
+              fibre: 9,
+              assumptions: "1 tsp oil included",
+              approved: false,
+            },
+          },
+        ],
+      },
+    });
+  });
+  const request = async () => {
+    await page
+      .getByLabel("Message", { exact: true })
+      .fill("I'm craving a samosa. Can it fit? Adjust dinner.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByText("Make room for your craving?")).toBeVisible();
+  };
+  await request();
+  await page.getByRole("button", { name: "Reject adjustment" }).click();
+  expect(
+    await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("nudge.local.v1")!).plan.every((d: any) =>
+        d.meals.every((m: any) => m.name === "Original dal meal"),
+      ),
+    ),
+  ).toBe(true);
+  await request();
+  await page.getByRole("button", { name: "Approve dinner adjustment" }).click();
+  await expect(
+    page.getByRole("button", { name: "I ate it — log food" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Daily calorie intake" }),
+  ).toHaveAttribute("aria-valuetext", "1000 of 1800 kcal");
+  const changed = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(
+    changed.plan
+      .flatMap((d: any) => d.meals)
+      .filter((m: any) => m.name === "Dal, sabzi and roti"),
+  ).toHaveLength(1);
+  expect(changed.foods).toHaveLength(1);
+  await page.getByRole("button", { name: "I ate it — log food" }).click();
+  await expect(
+    page.getByRole("progressbar", { name: "Daily calorie intake" }),
+  ).toHaveAttribute("aria-valuetext", "1250 of 1800 kcal");
+  await expect(
+    page.getByRole("progressbar", { name: "Daily protein intake" }),
+  ).toHaveAttribute("aria-valuetext", "35 of 60 g");
+  await expect(
+    page.getByRole("progressbar", { name: "Daily fibre intake" }),
+  ).toHaveAttribute("aria-valuetext", "13 of 25 g");
+  await page.reload();
+  await expect(
+    page.getByRole("progressbar", { name: "Daily protein intake" }),
+  ).toHaveAttribute("aria-valuetext", "35 of 60 g");
+  await page.screenshot({
+    path: "/tmp/nudge-three-intake-rings.png",
+    fullPage: true,
+  });
+});
+
+test("manual nutrient edits and deletion recalculate without treating unknown values as zero", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("Chana salad");
+  await page.getByLabel("Portion", { exact: true }).fill("1 katori");
+  await page.getByLabel("Estimated calories", { exact: true }).fill("250");
+  await page.getByLabel("Protein (g)", { exact: true }).fill("12");
+  await page.getByLabel("Fibre (g)", { exact: true }).fill("8");
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  const protein = page.getByRole("progressbar", {
+    name: "Daily protein intake",
+  });
+  const fibre = page.getByRole("progressbar", { name: "Daily fibre intake" });
+  await expect(protein).toHaveAttribute("aria-valuetext", "12 of 60 g");
+  await expect(fibre).toHaveAttribute("aria-valuetext", "8 of 25 g");
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Protein (g)", { exact: true }).fill("15");
+  await page.getByLabel("Fibre (g)", { exact: true }).fill("");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(protein).toHaveAttribute("aria-valuetext", "15 of 60 g");
+  await expect(fibre).toHaveAttribute(
+    "aria-valuetext",
+    "0 of 25 g; 1 entries missing nutrition",
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(fibre).toHaveAttribute("aria-valuetext", "8 of 25 g");
+  await page.getByRole("button", { name: "Open food ledger" }).click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await expect(protein).toHaveAttribute("aria-valuetext", "0 of 60 g");
+  await expect(fibre).toHaveAttribute("aria-valuetext", "0 of 25 g");
+});
+test("a dinner adjustment cannot overwrite intake changed since the suggestion", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("staleFixture")) return;
+    sessionStorage.setItem("staleFixture", "yes");
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    s.plan = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+      day,
+      meals: ["Breakfast", "Lunch", "Dinner"].map((slot) => ({
+        slot,
+        name: "Original dal",
+        portion: "1 bowl",
+        ingredients: ["lentils"],
+        calories: 500,
+        assumptions: "Estimate",
+        approved: true,
+      })),
+    }));
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.route("**/api/chat", async (route) => {
+    const body = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        kind: "adjustment",
+        message: "Dinner suggestion",
+        days: [],
+        foods: [
+          {
+            name: "Samosa",
+            portion: "1 medium",
+            calories: 250,
+            protein: 5,
+            fibre: 3,
+            assumptions: "Fried",
+          },
+        ],
+        adjustments: [
+          {
+            day: body.context.weekday,
+            meal: {
+              slot: "Dinner",
+              name: "Revised dal",
+              portion: "1 small bowl",
+              ingredients: ["lentils"],
+              calories: 350,
+              protein: 15,
+              fibre: 5,
+              assumptions: "Estimate",
+            },
+          },
+        ],
+      },
+    });
+  });
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("Craving a samosa, adjust dinner");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("Make room for your craving?")).toBeVisible();
+  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("Banana");
+  await page.getByLabel("Portion", { exact: true }).fill("1 medium");
+  await page.getByLabel("Estimated calories", { exact: true }).fill("100");
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Approve dinner adjustment" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "changed since this suggestion",
+  );
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(saved.foods).toHaveLength(1);
+  expect(
+    saved.plan
+      .flatMap((d: any) => d.meals)
+      .every((m: any) => m.name === "Original dal"),
+  ).toBe(true);
 });

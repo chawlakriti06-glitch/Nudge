@@ -44,7 +44,7 @@ test("Netlify function routing returns JSON status and missing-key response", as
     );
     expect(await status.json()).toEqual({
       configured: false,
-      model: "gemini-2.5-flash-lite",
+      model: "gemini-3.5-flash-lite",
     });
     const r = await handler(request());
     expect(r.status).toBe(503);
@@ -369,7 +369,7 @@ test("a meal label gets one real provider correction, not a fabricated assistant
       const payload = JSON.parse(opts.body);
       expect(
         payload.generationConfig.responseJsonSchema.properties.kind.enum,
-      ).toEqual(["message", "log"]);
+      ).toEqual(["message", "log", "adjustment"]);
       expect(payload.systemInstruction.parts[0].text).toContain(
         "how many eggs",
       );
@@ -615,4 +615,125 @@ test("a short off-menu follow-up corrects meal-label food previews", async () =>
   expect(response.status).toBe(200);
   expect(calls).toBe(2);
   expect((await response.json()).foods[0].name).toBe("Eggs and toast");
+});
+test("schema rejection retries JSON mode on the same model and validates output", async () => {
+  let calls = 0;
+  const r = await handleApi(
+    request({
+      message: "I had 2 boiled eggs and 1 plain toast",
+      context: { profile: { meals: 3 } },
+    }),
+    {
+      NUDGE_GEMINI_API_KEY: "private-key",
+      NUDGE_GEMINI_MODEL: "gemini-example",
+    },
+    async (url: string, init: RequestInit) => {
+      expect(url).toContain("gemini-example:generateContent");
+      const payload = JSON.parse(init.body as string);
+      calls++;
+      if (calls === 1) {
+        expect(payload.generationConfig.responseJsonSchema).toBeDefined();
+        return new Response(
+          JSON.stringify({
+            error: { message: "Request contains an invalid argument" },
+          }),
+          { status: 400 },
+        );
+      }
+      expect(payload.generationConfig).not.toHaveProperty("responseJsonSchema");
+      expect(payload.generationConfig.responseMimeType).toBe(
+        "application/json",
+      );
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      kind: "log",
+                      message: "Food estimate",
+                      foods: [
+                        {
+                          name: "Eggs and toast",
+                          portion: "2 boiled eggs and 1 slice",
+                          calories: 230,
+                          protein: 15,
+                          fibre: 2,
+                          assumptions: "No butter or oil",
+                        },
+                      ],
+                      adjustments: [],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(r.status).toBe(200);
+  expect((await r.json()).foods[0].protein).toBe(15);
+});
+
+test("a craving adjustment can only target a meal in today's approved menu", async () => {
+  for (const proposedDay of ["Thu", "Fri"]) {
+    const meal = {
+      slot: "Dinner",
+      name: "Dal roti",
+      portion: "1 katori and 1 roti",
+      ingredients: ["dal", "wheat"],
+      calories: 450,
+      protein: 18,
+      fibre: 8,
+      assumptions: "Oil included",
+    };
+    const r = await handleApi(
+      request({
+        message: "I'm craving a samosa, adjust dinner",
+        context: {
+          today: "2026-10-08",
+          weekday: "Thu",
+          profile: { meals: 3, diet: "vegetarian" },
+          plan: [{ day: "Thu", meals: [meal] }],
+        },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test-key" },
+      async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        kind: "adjustment",
+                        message: "Proposed dinner",
+                        foods: [
+                          {
+                            name: "Samosa",
+                            portion: "1 medium",
+                            calories: 250,
+                            protein: 5,
+                            fibre: 3,
+                            assumptions: "Fried",
+                          },
+                        ],
+                        adjustments: [{ day: proposedDay, meal }],
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ),
+    );
+    expect(r.status).toBe(proposedDay === "Thu" ? 200 : 502);
+  }
 });

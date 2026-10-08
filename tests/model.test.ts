@@ -59,6 +59,8 @@ describe("Nudge invariants", () => {
     expect(totals(foods, 1800, "2026-10-07")).toEqual({
       eaten: 1900,
       remaining: -100,
+      protein: { value: 0, unknown: 1 },
+      fibre: { value: 0, unknown: 1 },
     });
     expect(
       totals(
@@ -162,4 +164,42 @@ it("rejects generic meal labels as confirmable food previews", () => {
       p,
     ),
   ).toThrow("actual food or portion");
+});
+it("sums known nutrient values by date and flags missing historical nutrition", () => {
+  const foods = [
+    {
+      id: "a",
+      date: "2026-10-08",
+      name: "Dal",
+      portion: "1 bowl",
+      calories: 250,
+      protein: 12,
+      fibre: 8,
+      assumptions: "Estimate",
+    },
+    {
+      id: "b",
+      date: "2026-10-08",
+      name: "Old entry",
+      portion: "1 plate",
+      calories: 300,
+      assumptions: "Unknown macros",
+    },
+    {
+      id: "c",
+      date: "2026-10-07",
+      name: "Different day",
+      portion: "1 bowl",
+      calories: 250,
+      protein: 30,
+      fibre: 20,
+      assumptions: "Estimate",
+    },
+  ];
+  expect(totals(foods, 1800, "2026-10-08")).toEqual({
+    eaten: 550,
+    remaining: 1250,
+    protein: { value: 12, unknown: 1 },
+    fibre: { value: 8, unknown: 1 },
+  });
 });

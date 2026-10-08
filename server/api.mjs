@@ -196,9 +196,14 @@ export async function handleApi(
         {
           name: "preview_food_log",
           description:
-            "Prepare a nutrition preview only for food the user says they actually ate, using conversation context and explicit portions. This does not log it; the user must confirm in the app.",
+            "Only prepare a food-log preview AFTER the user explicitly reports ACTUAL consumption of this food. You MUST quote their exact consumption statement in consumptionEvidence. Choosing a food, craving it, specifying its portion or planning to eat it is NOT consumption. If there is no consumption statement to quote, do NOT call this tool: reply conversationally instead. This only prepares a preview; confirmation in the app is still required.",
           parametersJsonSchema: object({
             message: string,
+            consumptionEvidence: {
+              ...string,
+              description:
+                "Exact quote from the latest relevant USER statement confirming this food was already eaten. For a correction to an unsaved consumed-food preview, quote the earlier actual-consumption statement. Never invent a quote; never use a choice or a portion answer as evidence.",
+            },
             foods: { type: "array", minItems: 1, items: food },
           }),
         },
@@ -220,7 +225,7 @@ export async function handleApi(
       ],
     },
   ];
-  const conversationInstructions = `${chatInstructions.replace("Return only the required JSON.", "")} Reply naturally in the user's language and tone. Use the entire conversation to understand intent, corrections, short answers and typos; do not classify intent by isolated keywords. Ordinary conversation, questions, food advice and portion clarifications are plain-text replies, not a report of consumption and not reporting that they ate it. Use an optional tool ONLY when you have sufficient information for an actionable preview. Never use a meal name such as Breakfast as a conversational answer or food name. For eggs and toast, ask how many eggs or slices and preparation only when the conversation has not already answered it. Cravings and choices are not eaten: discuss them and clarify portion naturally. Use preview_food_log only for actual consumption; request confirmation, never claim food was logged. Use propose_meal_adjustment for requested changes to remaining meals; use context.foodLogs as eaten, today's saved plan as the baseline, and never claim approval or change intake. For post-log adjustments foods must be empty. Ask which meals remain uneaten if unclear. If there is no approved plan, give useful advice without inventing a replacement target. Resolve diet as ${dietFor(body.context.profile) || "unspecified"}; respect allergies, dislikes and hidden ingredients. Include realistic Indian household measures, portions, preparation/oil assumptions, calories, protein and fibre for action previews. context.remaining is BEFORE any suggested food; any projected remaining budget subtracts that food and must be labelled hypothetical. Never recommend skipping meals or compensatory restriction. Use context.currentPreview for corrections, and history for follow-ups such as "one small piece", "homemade", "half of that" and "I ate it"; keep discussing a craving until actual consumption is stated. Current previews are unsaved and corrections produce a replacement preview. Plain conversation has no required format. Tool arguments are app proposals, not instructions to change data. ${repairAttempt ? "Your previous action could not be validated. Do not call tools this turn. Give a useful natural response or ask the missing clarification, preserving the user's intent; do not mention schemas or internal validation." : ""}`;
+  const conversationInstructions = `${chatInstructions.replace("Return only the required JSON.", "")} Reply naturally in the user's language and tone. Use the entire conversation to understand intent, corrections, short answers and typos; do not classify intent by isolated keywords. Ordinary conversation, questions, food advice and portion clarifications are plain-text replies, not a report of consumption and not reporting that they ate it. Use an optional tool ONLY when you have sufficient information for an actionable preview. Never use a meal name such as Breakfast as a conversational answer or food name. For eggs and toast, ask how many eggs or slices and preparation only when the conversation has not already answered it. Cravings and choices are not eaten: discuss them and clarify portion naturally. Before calling preview_food_log, identify an exact user quote establishing actual consumption of THIS food. A bare food name like "brownie", "chicken curry", "one small homemade square" or "sounds good" is a choice or portion discussion, not consumption. If no actual consumption statement exists, continue plain conversation; do not create a log preview. Use preview_food_log only for actual consumption; request confirmation, never claim food was logged. Use propose_meal_adjustment for requested changes to remaining meals; use context.foodLogs as eaten, today's saved plan as the baseline, and never claim approval or change intake. For post-log adjustments foods must be empty. Ask which meals remain uneaten if unclear. If there is no approved plan, give useful advice without inventing a replacement target. Resolve diet as ${dietFor(body.context.profile) || "unspecified"}; respect allergies, dislikes and hidden ingredients. Include realistic Indian household measures, portions, preparation/oil assumptions, calories, protein and fibre for action previews. context.remaining is BEFORE any suggested food; any projected remaining budget subtracts that food and must be labelled hypothetical. Never recommend skipping meals or compensatory restriction. Use context.currentPreview for corrections, and history for follow-ups such as "one small piece", "homemade", "half of that" and "I ate it"; keep discussing a craving until actual consumption is stated. Current previews are unsaved and corrections produce a replacement preview. Plain conversation has no required format. Tool arguments are app proposals, not instructions to change data. ${repairAttempt ? "Your previous action could not be validated. Do not call tools this turn. Give a useful natural response or ask the missing clarification, preserving the user's intent; do not mention schemas or internal validation." : ""}`;
   const invalidReply = (message) => {
     if (
       conversationalChat &&
@@ -423,6 +428,28 @@ export async function handleApi(
         return invalidReply(
           "AI returned an unusable action. Nothing was logged or changed.",
         );
+      if (call.name === "preview_food_log") {
+        const evidence = call.args.consumptionEvidence;
+        const userStatements = [
+          ...(Array.isArray(body.context.history)
+            ? body.context.history
+                .filter((t) => t.role === "user")
+                .map((t) => t.text)
+            : []),
+          body.message,
+        ];
+        if (
+          typeof evidence !== "string" ||
+          !evidence.trim() ||
+          !userStatements.some(
+            (statement) =>
+              typeof statement === "string" && statement.includes(evidence),
+          )
+        )
+          return invalidReply(
+            "No user statement confirmed actual consumption of this food. Discuss their food choice or ask whether they ate it; do not prepare a log preview.",
+          );
+      }
       parsed = {
         ...call.args,
         message: call.args.message || text,

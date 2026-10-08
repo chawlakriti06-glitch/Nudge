@@ -1377,7 +1377,11 @@ test("multi-turn conversation uses optional server actions, corrects a preview, 
           ? {
               functionCall: {
                 name: "preview_food_log",
-                args: { message: turn.reply, foods: [turn.food] },
+                args: {
+                  message: turn.reply,
+                  consumptionEvidence: "I ate half",
+                  foods: [turn.food],
+                },
               },
             }
           : { text: turn.reply };

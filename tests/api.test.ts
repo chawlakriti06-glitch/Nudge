@@ -1191,7 +1191,11 @@ test("one conversational interface handles a complete craving, portion, consumpt
           ? {
               functionCall: {
                 name: "preview_food_log",
-                args: { message: turn.reply, foods: [turn.food] },
+                args: {
+                  message: turn.reply,
+                  consumptionEvidence: "okay i ate it",
+                  foods: [turn.food],
+                },
               },
             }
           : { text: turn.reply };
@@ -1240,6 +1244,7 @@ test("a malformed optional action falls back to a real model clarification inste
                         name: "preview_food_log",
                         args: {
                           message: "Dal preview",
+                          consumptionEvidence: "I had a bowl of dal",
                           foods: [
                             {
                               name: "Dal",
@@ -1350,4 +1355,52 @@ test("optional meal changes are validated separately from ordinary conversation"
     foods: [],
     adjustments: [{ day: "Thu", meal: replacement }],
   });
+});
+
+test("a food choice cannot become a log preview using fabricated consumption evidence", async () => {
+  let calls = 0;
+  const r = await handleApi(
+    request({
+      operation: "chat",
+      message: "brownie",
+      context: {
+        profile: { meals: 3 },
+        history: [{ role: "user", text: "something chocolatey sounds good" }],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () => {
+      calls++;
+      const part =
+        calls === 1
+          ? {
+              functionCall: {
+                name: "preview_food_log",
+                args: {
+                  message: "Brownie preview",
+                  consumptionEvidence: "I ate a brownie",
+                  foods: [
+                    {
+                      name: "Brownie",
+                      portion: "40 g",
+                      calories: 180,
+                      protein: 3,
+                      fibre: 1,
+                      assumptions: "Recipe estimate",
+                    },
+                  ],
+                },
+              },
+            }
+          : {
+              text: "What size brownie are you thinking of? We’re just discussing it; nothing is logged.",
+            };
+      return new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [part] } }] }),
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(r.status).toBe(200);
+  expect(await r.json()).toMatchObject({ kind: "message", foods: [] });
 });

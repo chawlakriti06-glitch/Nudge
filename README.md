@@ -59,3 +59,14 @@ Browser tests use `/usr/bin/chromium`; adjust the test runner's executable path 
 ## Netlify deployment
 
 Connect this repository, leave the base directory blank, use `npm run build`, and publish `dist`. Set Node.js to 24. The included configuration supplies these defaults. `netlify/functions/api.mjs` shares the local server handler, and `/api/*` routes to the function before the SPA fallback. Follow the Gemini configuration section above, then redeploy. No database or account migration is needed; existing browser data is preserved.
+
+## Vercel deployment
+
+This repository now includes Vercel Node API functions in `api/` for `/api/chat`, `/api/status` and `/api/models`. They use the same Gemini handler as local development and Netlify. `vercel.json` configures the Vite build, `dist` output, function duration, and SPA fallback that excludes API routes. Node.js is pinned to 24.x. Netlify files are retained so the previous site need not be altered.
+
+1. In Vercel, choose Add New → Project and import `chawlakriti06-glitch/Nudge` from GitHub. Choose Vite and leave Root Directory at the repository root. Build command is `npm run build`; Output Directory is `dist`.
+2. Add `NUDGE_GEMINI_API_KEY` securely to the Production environment. Copy your Google AI Studio key directly into Vercel; never paste it in chat. Set `NUDGE_GEMINI_MODEL` to `gemini-3.5-flash-lite`, as recommended by Google's response for new users. Keep Google billing disabled and check that your project has free-tier quota for this model. No paid fallback is used.
+3. Deploy. Open `/api/status` on the new site to verify configuration presence, then request a weekly menu to test live provider access. A configured flag alone does not prove a successful AI call.
+4. Keep your old Netlify site until you are satisfied with the Vercel deployment. A different site address has separate browser localStorage: existing Netlify data does **not** automatically appear on Vercel. Do not delete the old site's browser data.
+
+The migration configuration was tested locally; Vercel account access, production deployment and live Gemini calls still require user setup. Free hosting has limits and eligibility rules; check Vercel's current Hobby-plan terms before publishing. A Hobby deployment does not require a paid upgrade for this configuration.

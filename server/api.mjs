@@ -92,7 +92,7 @@ export async function handleApi(
   if (!env.NUDGE_GEMINI_API_KEY)
     return json(503, {
       error:
-        "AI is not configured yet. Add NUDGE_GEMINI_API_KEY to the Netlify server environment, then redeploy. Use a Google AI Studio free-tier project. Manual logging still works.",
+        "AI is not configured yet. Add NUDGE_GEMINI_API_KEY to the hosting server environment, then redeploy. Use a Google AI Studio free-tier project. Manual logging still works.",
     });
   let body;
   try {
@@ -190,7 +190,7 @@ export async function handleApi(
       const errors = {
         429: "Gemini's free-tier limit is reached. Wait and retry later, or check the project's free-tier quota in Google AI Studio. No paid fallback was attempted.",
         400: "Gemini rejected the request. Check that the chosen model supports structured JSON responses.",
-        401: "Gemini could not authenticate. Check NUDGE_GEMINI_API_KEY in Netlify.",
+        401: "Gemini could not authenticate. Check NUDGE_GEMINI_API_KEY in your host’s environment settings.",
         403: "Gemini access was denied. Check the Google AI Studio key, project permissions and availability in your region.",
         404: "The selected Gemini model is unavailable. Set NUDGE_GEMINI_MODEL to a currently available free-tier model in Google AI Studio.",
       };

@@ -22,7 +22,7 @@ test("HTML fallback produces actionable error instead of browser parse message",
         headers: { "content-type": "text/html" },
       }),
     ),
-  ).rejects.toThrow("Netlify Function");
+  ).rejects.toThrow("API functions");
 });
 test("malformed JSON produces readable error", async () => {
   await expect(

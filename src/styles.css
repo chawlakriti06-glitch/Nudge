@@ -1667,3 +1667,42 @@ fieldset > .two-col {
 .home-heading .subtitle {
   font-size: 16px;
 }
+
+/* Keep conversation input within reach while earlier messages scroll. */
+:root {
+  --app-bottom-inset: 0px;
+  --navigation-height: calc(80px + env(safe-area-inset-bottom, 0px));
+}
+.bottom-nav {
+  height: var(--navigation-height);
+}
+.chat-shell {
+  padding-bottom: calc(var(--navigation-height) + 104px);
+}
+.chat-input-dock {
+  position: fixed;
+  bottom: calc(var(--app-bottom-inset) + var(--navigation-height));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  padding: 12px 24px;
+  background: #fffdf8;
+  border-top: 1px solid #d4dfe7;
+  z-index: 11;
+}
+.chat-input-dock .composer {
+  margin: 0;
+  width: 100%;
+}
+@media (min-width: 650px) {
+  :root {
+    --app-bottom-inset: 28px;
+  }
+}
+@media (max-width: 360px) {
+  .chat-input-dock {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}

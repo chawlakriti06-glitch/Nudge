@@ -1053,3 +1053,50 @@ test("confirmed extra food offers lunch and dinner review without double-countin
     true,
   );
 });
+
+test("chat input stays above navigation while reading a long conversation", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({
+      json: {
+        kind: "message",
+        message: "Lunch options and preparation assumptions. ".repeat(100),
+        foods: [],
+        days: [],
+        adjustments: [],
+      },
+    }),
+  );
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("What can I have for lunch?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".bubble.assistant").last()).toContainText(
+    "Lunch options",
+  );
+  for (const width of [390, 320, 900]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const scroll of [0, 500, 99999]) {
+      await page.evaluate((y) => window.scrollTo(0, y), scroll);
+      const input = await page
+        .getByLabel("Message", { exact: true })
+        .boundingBox();
+      const nav = await page
+        .getByRole("navigation", { name: "Main navigation" })
+        .boundingBox();
+      expect(input).not.toBeNull();
+      expect(nav).not.toBeNull();
+      expect(input!.y).toBeGreaterThan(0);
+      expect(input!.y + input!.height).toBeLessThanOrEqual(nav!.y);
+      expect(input!.x).toBeGreaterThanOrEqual(0);
+      expect(input!.x + input!.width).toBeLessThanOrEqual(width);
+    }
+  }
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Menu", exact: true })
+    .click();
+  await expect(page.getByLabel("Message", { exact: true })).toHaveCount(0);
+});

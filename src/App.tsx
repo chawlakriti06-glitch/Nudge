@@ -1367,7 +1367,7 @@ export default function App() {
       </main>
     );
   return (
-    <main className="app shell">
+    <main className={`app shell ${screen === "home" ? "chat-shell" : ""}`}>
       <header className="topbar">
         <span className="eyebrow">
           {screen === "home"
@@ -1851,7 +1851,7 @@ export default function App() {
               </button>
             </div>
           )}
-          {input()}
+          <div className="chat-input-dock">{input()}</div>
         </>
       )}
       {screen === "menu" && (

@@ -822,3 +822,39 @@ test("persistent Gemini 503 stops after one retry with a redacted provider reaso
   expect(body.error).toContain("automatic retry");
   expect(body.error).not.toContain("private-key");
 });
+test("Hinglish greetings get a real conversational reply without a nutrition schema", async () => {
+  const r = await handleApi(
+    request({
+      message: "kya haal hai?",
+      context: { profile: { meals: 3 }, history: [] },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test-key" },
+    async (_url: string, init: RequestInit) => {
+      const payload = JSON.parse(init.body as string);
+      expect(payload.generationConfig).not.toHaveProperty("responseJsonSchema");
+      expect(payload.generationConfig).not.toHaveProperty("responseMimeType");
+      expect(payload.systemInstruction.parts[0].text).toContain(
+        "Reply naturally",
+      );
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              finishReason: "STOP",
+              content: {
+                parts: [
+                  { text: "Main theek hoon! Tumhara din kaisa ja raha hai?" },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(r.status).toBe(200);
+  const reply = await r.json();
+  expect(reply.message).toContain("Main theek");
+  expect(reply.kind).toBe("message");
+  expect(reply.foods).toEqual([]);
+});

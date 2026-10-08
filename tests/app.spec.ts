@@ -32,6 +32,12 @@ const seed = async (page: Page) => {
   }, profile);
   await page.goto("/");
 };
+async function nutritionOverride(page: Page) {
+  if (
+    !(await page.getByLabel("Estimated calories", { exact: true }).isVisible())
+  )
+    await page.getByText("Enter nutrition myself", { exact: true }).click();
+}
 test("manual onboarding retains welcome food, confirms once, reloads, edits and deletes", async ({
   page,
 }) => {
@@ -50,6 +56,7 @@ test("manual onboarding retains welcome food, confirms once, reloads, edits and 
   ).toBeVisible();
   await page.getByRole("button", { name: "Enter manually" }).click();
   await page.getByLabel("Portion", { exact: true }).fill("2 medium samosas");
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("500");
   await page.getByRole("button", { name: "Confirm & log" }).click();
   await expect(
@@ -61,6 +68,7 @@ test("manual onboarding retains welcome food, confirms once, reloads, edits and 
   ).toBeVisible();
   await page.getByRole("button", { name: "Open food ledger" }).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("450");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(
@@ -122,9 +130,10 @@ test("pause allows logging, resume and delete clear only Nudge", async ({
   await expect(
     page.getByText("Suggestions paused today.", { exact: false }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByRole("button", { name: "Log food" }).click();
   await page.getByLabel("Food", { exact: true }).fill("Toast");
   await page.getByLabel("Portion", { exact: true }).fill("1 bread slice");
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("80");
   await page.getByRole("button", { name: "Confirm & log" }).click();
   await expect(page.getByText("1,720 kcal remaining")).toBeVisible();
@@ -292,9 +301,10 @@ test("different days, nutrient totals and undo recalculate independently", async
   page,
 }) => {
   await seed(page);
-  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByRole("button", { name: "Log food" }).click();
   await page.getByLabel("Food", { exact: true }).fill("Rice");
   await page.getByLabel("Portion", { exact: true }).fill("100 g cooked");
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("130");
   await page.getByLabel("Date", { exact: true }).fill("2026-01-01");
   await page.getByRole("button", { name: "Confirm & log" }).click();
@@ -382,9 +392,10 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   const arc = ring.locator(".calorie-progress");
   await expect(ring).toHaveAttribute("aria-valuenow", "0");
   await expect(arc).toHaveAttribute("stroke-dashoffset", "100");
-  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByRole("button", { name: "Log food" }).click();
   await page.getByLabel("Food", { exact: true }).fill("Lunch");
   await page.getByLabel("Portion", { exact: true }).fill("1 plate");
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("900");
   await expect(ring).toHaveAttribute("aria-valuenow", "0");
   await page
@@ -397,6 +408,7 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Open food ledger" }).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("450");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(ring).toHaveAttribute("aria-valuenow", "25");
@@ -674,9 +686,10 @@ test("manual nutrient edits and deletion recalculate without treating unknown va
   page,
 }) => {
   await seed(page);
-  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByRole("button", { name: "Log food" }).click();
   await page.getByLabel("Food", { exact: true }).fill("Chana salad");
   await page.getByLabel("Portion", { exact: true }).fill("1 katori");
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("250");
   await page.getByLabel("Protein (g)", { exact: true }).fill("12");
   await page.getByLabel("Fibre (g)", { exact: true }).fill("8");
@@ -770,9 +783,10 @@ test("a dinner adjustment cannot overwrite intake changed since the suggestion",
     .fill("Craving a samosa, adjust dinner");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("Make room for your craving?")).toBeVisible();
-  await page.getByRole("button", { name: "Log manually" }).click();
+  await page.getByRole("button", { name: "Log food" }).click();
   await page.getByLabel("Food", { exact: true }).fill("Banana");
   await page.getByLabel("Portion", { exact: true }).fill("1 medium");
+  await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("100");
   await page
     .getByRole("button", { name: "Confirm & log", exact: true })
@@ -790,4 +804,72 @@ test("a dinner adjustment cannot overwrite intake changed since the suggestion",
       .flatMap((d: any) => d.meals)
       .every((m: any) => m.name === "Original dal"),
   ).toBe(true);
+});
+test("food logging estimates two eggs without asking for calories or using Gemini", async ({
+  page,
+}) => {
+  await seed(page);
+  let calls = 0;
+  await page.route("**/api/chat", (r) => {
+    calls++;
+    return r.fulfill({ status: 503, json: { error: "Unavailable" } });
+  });
+  await page.getByRole("button", { name: "Log food" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("2 eggs");
+  await expect(
+    page.getByLabel("Estimated calories", { exact: true }),
+  ).not.toBeVisible();
+  await page.getByLabel("Food", { exact: true }).press("Enter");
+  await expect(
+    page.getByText("Standard food reference · estimated"),
+  ).toBeVisible();
+  await expect(page.getByText("156 kcal est.")).toBeVisible();
+  expect(calls).toBe(0);
+  await expect(
+    page.getByRole("progressbar", { name: "Daily calorie intake" }),
+  ).toHaveAttribute("aria-valuetext", "0 of 1800 kcal");
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await expect(
+    page.getByRole("progressbar", { name: "Daily calorie intake" }),
+  ).toHaveAttribute("aria-valuetext", "156 of 1800 kcal");
+  await expect(
+    page.getByRole("progressbar", { name: "Daily protein intake" }),
+  ).toHaveAttribute("aria-valuetext", "12.6 of 60 g");
+});
+test("an unfamiliar food description opens AI review without typed nutrition", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.route("**/api/chat", async (r) => {
+    expect(r.request().postDataJSON().message).toContain(
+      "I ate 1 katori chana chaat",
+    );
+    await r.fulfill({
+      json: {
+        message: "Here's an estimate assuming a 150 ml katori, no extra oil.",
+        kind: "log",
+        foods: [
+          {
+            name: "Chana chaat",
+            portion: "1 katori (150 ml)",
+            calories: 200,
+            protein: 9,
+            fibre: 7,
+            assumptions: "Recipe estimate, no added oil",
+          },
+        ],
+        days: [],
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Log food" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("1 katori chana chaat");
+  await page.getByRole("button", { name: "Estimate & review" }).click();
+  await expect(page.getByText("Count this as eaten?")).toBeVisible();
+  await expect(page.getByText("200 kcal est.")).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Daily calorie intake" }),
+  ).toHaveAttribute("aria-valuenow", "0");
 });

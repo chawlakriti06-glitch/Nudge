@@ -1,3 +1,4 @@
+import { referenceEstimate } from "./nutrition";
 import { dietFor } from "./diet.js";
 import { readApiJson } from "./api";
 import { useEffect, useRef, useState } from "react";
@@ -690,6 +691,7 @@ export default function App() {
     message: string,
     source: "chat" | "menu" = "chat",
     target?: { day: string; index: number },
+    logOptions?: { logDate: string; editId: string },
   ) => {
     if (lock.current || !p || !message.trim()) return;
     if (/^i (?:don['’]t|do not) care today[.!]?$/i.test(message.trim())) {
@@ -747,6 +749,7 @@ export default function App() {
                   : state.plan,
             history: state.chat.slice(-12),
             currentPreview: proposal,
+            consumedOn: logOptions?.logDate,
           },
         }),
         signal: AbortSignal.timeout(65000),
@@ -811,6 +814,8 @@ export default function App() {
         setProposal({
           kind: result.kind,
           date: day,
+          logDate: logOptions?.logDate,
+          editId: logOptions?.editId,
           adjustments: result.adjustments,
           basis:
             result.kind === "adjustment"
@@ -911,7 +916,7 @@ export default function App() {
         aria-label="Message"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="Tell me what you ate…"
+        placeholder="Food, cravings, or just a chat…"
         maxLength={4000}
       />
       <button
@@ -939,6 +944,34 @@ export default function App() {
       setError(
         "Meal count changed. Your approved plan and food history are preserved. Generate a revised draft to approve.",
       );
+  };
+  const estimateEntry = () => {
+    if (!food.name.trim() || busy) return;
+    const description = [food.name.trim(), food.portion.trim()]
+      .filter(Boolean)
+      .join(" ");
+    const standard = referenceEstimate(description);
+    setManual(false);
+    setError("");
+    setScreen("home");
+    if (standard) {
+      setProposal({
+        kind: "log",
+        foods: [standard],
+        days: [],
+        date: day,
+        logDate,
+        editId,
+        sourceLabel: "Standard food reference · estimated",
+      });
+    } else {
+      ask(
+        `I ate ${description}. Please estimate calories, protein and fibre with visible portion/preparation assumptions.`,
+        "chat",
+        undefined,
+        { logDate, editId },
+      );
+    }
   };
   const saveManual = () => {
     if (
@@ -1085,8 +1118,14 @@ export default function App() {
       setUndo(state.foods);
       update({
         foods: [
-          ...state.foods,
-          ...proposal.foods.map((f) => ({ ...f, id: uid(), date: day })),
+          ...state.foods.filter(
+            (f) => !proposal.editId || f.id !== proposal.editId,
+          ),
+          ...proposal.foods.map((f) => ({
+            ...f,
+            id: uid(),
+            date: proposal.logDate || day,
+          })),
         ],
         pending: "",
       });
@@ -1404,6 +1443,7 @@ export default function App() {
                   ? "FOOD LOG PREVIEW"
                   : "A LITTLE MENU ADJUSTMENT"}
               </span>
+              {proposal.sourceLabel && <small>{proposal.sourceLabel}</small>}
               <h2>
                 {proposal.kind === "log"
                   ? "Count this as eaten?"
@@ -1535,7 +1575,7 @@ export default function App() {
           )}
           <div className="quick-actions">
             <button onClick={() => showManual()}>
-              <Plus size={15} /> Log manually
+              <Plus size={15} /> Log food
             </button>
             <button
               disabled={busy}
@@ -1942,13 +1982,15 @@ export default function App() {
               <>
                 <h2>{editId ? "Edit food log" : "Log what you ate"}</h2>
                 <p>
-                  Only confirmed food counts. Enter calories from a label or
-                  your own estimate.
+                  Tell us what you ate, including any amount you know—like “2
+                  eggs” or “1 katori dal”. We'll estimate the nutrition for you
+                  to review.
                 </p>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    saveManual();
+                    if (food.calories === "") estimateEntry();
+                    else saveManual();
                   }}
                 >
                   <label>
@@ -1963,9 +2005,9 @@ export default function App() {
                     />
                   </label>
                   <label>
-                    Portion
+                    Portion (optional if included above)
                     <input
-                      required
+                      aria-label="Portion"
                       value={food.portion}
                       onChange={(e) =>
                         setFood({ ...food, portion: e.target.value })
@@ -1973,62 +2015,72 @@ export default function App() {
                       placeholder="2 samosas, 1 roti, 100 g cooked rice…"
                     />
                   </label>
-                  <label>
-                    Estimated calories
-                    <input
-                      required
-                      type="number"
-                      min="0"
-                      max="10000"
-                      value={food.calories}
-                      onChange={(e) =>
-                        setFood({ ...food, calories: e.target.value })
-                      }
-                    />
-                  </label>
-                  <div className="two-col">
+                  <button
+                    className="primary"
+                    type={food.calories === "" ? "submit" : "button"}
+                    disabled={busy || !food.name.trim()}
+                    onClick={food.calories === "" ? undefined : estimateEntry}
+                  >
+                    Estimate & review
+                  </button>
+                  <details open={!!editId || !!food.calories}>
+                    <summary>Enter nutrition myself</summary>
                     <label>
-                      Protein (g)
+                      Estimated calories
                       <input
                         type="number"
                         min="0"
-                        max="1000"
-                        step="any"
-                        value={food.protein}
-                        placeholder="Unknown"
+                        max="10000"
+                        value={food.calories}
                         onChange={(e) =>
-                          setFood({ ...food, protein: e.target.value })
+                          setFood({ ...food, calories: e.target.value })
                         }
                       />
                     </label>
+                    <div className="two-col">
+                      <label>
+                        Protein (g)
+                        <input
+                          type="number"
+                          min="0"
+                          max="1000"
+                          step="any"
+                          value={food.protein}
+                          placeholder="Unknown"
+                          onChange={(e) =>
+                            setFood({ ...food, protein: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Fibre (g)
+                        <input
+                          type="number"
+                          min="0"
+                          max="1000"
+                          step="any"
+                          value={food.fibre}
+                          placeholder="Unknown"
+                          onChange={(e) =>
+                            setFood({ ...food, fibre: e.target.value })
+                          }
+                        />
+                      </label>
+                    </div>
+                    <small>
+                      Leave blank if unknown. Missing values are flagged in
+                      today's totals.
+                    </small>
                     <label>
-                      Fibre (g)
+                      Source / assumptions
                       <input
-                        type="number"
-                        min="0"
-                        max="1000"
-                        step="any"
-                        value={food.fibre}
-                        placeholder="Unknown"
+                        value={food.assumptions}
                         onChange={(e) =>
-                          setFood({ ...food, fibre: e.target.value })
+                          setFood({ ...food, assumptions: e.target.value })
                         }
                       />
                     </label>
-                  </div>
-                  <small>
-                    Leave blank if unknown. Missing values are flagged in
-                    today's totals.
-                  </small>
-                  <label>
-                    Source / assumptions
-                    <input
-                      value={food.assumptions}
-                      onChange={(e) =>
-                        setFood({ ...food, assumptions: e.target.value })
-                      }
-                    />
-                  </label>
+                  </details>
                   <label>
                     Date
                     <input
@@ -2038,10 +2090,12 @@ export default function App() {
                       onChange={(e) => setLogDate(e.target.value)}
                     />
                   </label>
-                  <button className="primary">
-                    {editId ? "Save changes" : "Confirm & log"}{" "}
-                    <Check size={17} />
-                  </button>
+                  {food.calories !== "" && (
+                    <button className="primary">
+                      {editId ? "Save changes" : "Confirm & log"}{" "}
+                      <Check size={17} />
+                    </button>
+                  )}
                   {error && (
                     <p className="error" role="alert">
                       {error}

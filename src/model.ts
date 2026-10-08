@@ -42,6 +42,9 @@ export type Proposal = {
   kind: "log" | "plan" | "adjustment";
   date?: string;
   fromCraving?: boolean;
+  logDate?: string;
+  editId?: string;
+  sourceLabel?: string;
   basis?: { intake: string; meal: string };
   adjustments?: { day: string; meal: Meal }[];
   foods: Omit<Food, "id" | "date">[];

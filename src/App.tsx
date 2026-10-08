@@ -1431,7 +1431,7 @@ export default function App() {
             ))}
             {busy && (
               <p className="thinking" role="status">
-                Thinking through your menu…
+                Thinking…
               </p>
             )}
             <div ref={chatEnd} />

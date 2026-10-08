@@ -745,6 +745,7 @@ export default function App() {
       logDate?: string;
       editId?: string;
       adjustmentSlots?: string[];
+      retry?: boolean;
     },
   ) => {
     if (lock.current || !p || !message.trim()) return;
@@ -768,10 +769,11 @@ export default function App() {
     if (source === "chat") {
       setProposal(null);
       setText("");
-      setState((s) => ({
-        ...s,
-        chat: [...s.chat, { id: uid(), role: "user", text: message }],
-      }));
+      if (!logOptions?.retry)
+        setState((s) => ({
+          ...s,
+          chat: [...s.chat, { id: uid(), role: "user", text: message }],
+        }));
     }
     try {
       const response = await fetch("/api/chat", {
@@ -801,7 +803,12 @@ export default function App() {
                 : state.draft.length
                   ? state.draft
                   : state.plan,
-            history: state.chat.slice(-12),
+            history: (logOptions?.retry &&
+            state.chat.at(-1)?.role === "user" &&
+            state.chat.at(-1)?.text === message
+              ? state.chat.slice(0, -1)
+              : state.chat
+            ).slice(-12),
             currentPreview: proposal,
             consumedOn: logOptions?.logDate,
             adjustmentSlots: logOptions?.adjustmentSlots,
@@ -1824,7 +1831,7 @@ export default function App() {
                   const last = [...state.chat]
                     .reverse()
                     .find((c) => c.role === "user");
-                  if (last) ask(last.text);
+                  if (last) ask(last.text, "chat", undefined, { retry: true });
                 }}
               >
                 Retry AI

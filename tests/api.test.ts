@@ -1077,3 +1077,55 @@ test("a post-log review requires both requested slots and never proposes logging
     if (r.status === 200) expect((await r.json()).foods).toEqual([]);
   }
 });
+
+test("a brownie craving without a portion gets conversation without food logging or a schema", async () => {
+  for (const message of [
+    "i want to eat a chocolate browine",
+    "i want to eat a chocolate brownie",
+  ]) {
+    const r = await handleApi(
+      request({
+        message,
+        context: {
+          profile: { meals: 3 },
+          remaining: 790,
+          foodLogs: [],
+          history: [],
+        },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test-key" },
+      async (_url: string, init: RequestInit) => {
+        const payload = JSON.parse(init.body as string);
+        expect(payload.generationConfig).not.toHaveProperty(
+          "responseJsonSchema",
+        );
+        expect(payload.generationConfig).not.toHaveProperty("responseMimeType");
+        expect(payload.systemInstruction.parts[0].text).toContain(
+          "not reporting that they ate it",
+        );
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: "A typical brownie is roughly 200–350 kcal. What size or weight are you considering? Nothing is logged yet.",
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+      },
+    );
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({
+      kind: "message",
+      foods: [],
+      days: [],
+      adjustments: [],
+    });
+  }
+});

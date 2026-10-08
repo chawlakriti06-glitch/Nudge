@@ -1256,3 +1256,45 @@ test("Home rings align despite missing nutrient captions and Log food has no rin
     page.getByRole("heading", { name: "Your weekly menu" }),
   ).toBeVisible();
 });
+
+test("retrying a failed craving keeps one user bubble and never logs the intended food", async ({
+  page,
+}) => {
+  await seed(page);
+  let attempts = 0;
+  await page.route("**/api/chat", (r) => {
+    attempts++;
+    if (attempts === 1)
+      return r.fulfill({
+        status: 502,
+        json: { error: "Craving reply unavailable" },
+      });
+    return r.fulfill({
+      json: {
+        message: "What size brownie are you considering?",
+        kind: "message",
+        foods: [],
+        days: [],
+        adjustments: [],
+      },
+    });
+  });
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("i want to eat a chocolate brownie");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Craving reply unavailable",
+  );
+  await page.getByRole("button", { name: "Retry AI", exact: true }).click();
+  await expect(page.locator(".bubble.assistant").last()).toContainText(
+    "What size brownie",
+  );
+  await expect(page.locator(".bubble.user")).toHaveCount(1);
+  expect(attempts).toBe(2);
+  expect(
+    await page.evaluate(
+      () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods,
+    ),
+  ).toHaveLength(0);
+});

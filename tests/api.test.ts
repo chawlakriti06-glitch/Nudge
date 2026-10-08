@@ -517,7 +517,9 @@ test("food estimates use a compact schema and omit full-week instructions", asyn
         ).not.toHaveProperty("days");
       else
         expect(sent.generationConfig).not.toHaveProperty("responseJsonSchema");
-      expect(sent.contents.at(-1).parts.at(-1).text).toBe("with 2 eggs");
+      expect(sent.contents.at(-1).parts.at(-1).text).toBe(
+        "i had 2 eggs and 1 bread toast. how many calories is that?",
+      );
       expect(sent.generationConfig.responseJsonSchema.required).not.toContain(
         "days",
       );

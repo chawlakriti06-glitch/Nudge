@@ -285,3 +285,67 @@ test("incomplete menu is rejected rather than fabricated or saved", async () => 
   expect(r.status).toBe(502);
   expect((await r.json()).error).toContain("profile requires 3");
 });
+
+test.each([3, 4])(
+  "full-week generation requires all seven named days with %i meals",
+  async (count) => {
+    const slots =
+      count === 4
+        ? ["Breakfast", "Lunch", "Snacks", "Dinner"]
+        : ["Breakfast", "Lunch", "Dinner"];
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const r = await handleApi(
+      request({
+        message: "Generate a complete seven-day draft menu",
+        context: { profile: { meals: count } },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test" },
+      async (_url: string, opts: any) => {
+        const schema = JSON.parse(opts.body).generationConfig
+          .responseJsonSchema;
+        expect(schema.properties.days.required).toEqual(days);
+        expect(schema.properties.kind.enum).toEqual(["plan"]);
+        for (const day of days) {
+          expect(
+            schema.properties.days.properties[day].properties.meals.minItems,
+          ).toBe(count);
+          expect(
+            schema.properties.days.properties[day].properties.day.enum,
+          ).toEqual([day]);
+        }
+        const plan = {
+          message: "Fixture",
+          kind: "plan",
+          foods: [],
+          days: Object.fromEntries(
+            days.map((day) => [
+              day,
+              {
+                day,
+                meals: slots.map((slot) => ({
+                  slot,
+                  name: "Meal",
+                  portion: "1 bowl",
+                  ingredients: ["rice"],
+                  calories: 300,
+                  assumptions: "Fixture",
+                })),
+              },
+            ]),
+          ),
+        };
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { content: { parts: [{ text: JSON.stringify(plan) }] } },
+            ],
+          }),
+        );
+      },
+    );
+    expect(r.status).toBe(200);
+    const plan = await r.json();
+    expect(plan.days.map((d: any) => d.day)).toEqual(days);
+    expect(plan.days.every((d: any) => d.meals.length === count)).toBe(true);
+  },
+);

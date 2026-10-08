@@ -129,7 +129,22 @@ export async function handleApi(
   daySchema.properties.meals.maxItems = count;
   daySchema.properties.meals.items.properties.slot.enum = mealSlots;
   responseSchema.properties.days.maxItems = 7;
-  const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. Actual consumed food does not replace a planned meal slot.`;
+  const fullWeekRequest =
+    /seven[ -]day|complete revised|generate.*(?:menu|week)/i.test(body.message);
+  if (fullWeekRequest) {
+    responseSchema.properties.kind.enum = ["plan"];
+    responseSchema.properties.days = object(
+      Object.fromEntries(
+        weekDays.map((day) => {
+          const definition = structuredClone(daySchema);
+          definition.properties.day.enum = [day];
+          return [day, definition];
+        }),
+      ),
+    );
+  }
+
+  const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun. Actual consumed food does not replace a planned meal slot.`;
   try {
     if (!/^gemini-[a-z0-9.-]+$/i.test(model))
       return json(503, {
@@ -213,6 +228,19 @@ export async function handleApi(
         error: "AI returned no usable response. Your saved data is unchanged.",
       });
     const parsed = JSON.parse(text);
+    if (
+      fullWeekRequest &&
+      parsed?.days &&
+      !Array.isArray(parsed.days) &&
+      typeof parsed.days === "object"
+    ) {
+      if (!weekDays.every((day) => Object.hasOwn(parsed.days, day)))
+        return json(502, {
+          error:
+            "Gemini omitted a required day. Your saved plan is unchanged; retry the complete draft.",
+        });
+      parsed.days = weekDays.map((day) => parsed.days[day]);
+    }
     if (
       !parsed ||
       typeof parsed.message !== "string" ||

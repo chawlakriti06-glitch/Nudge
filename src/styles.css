@@ -1706,3 +1706,166 @@ fieldset > .two-col {
     padding-right: 18px;
   }
 }
+
+/* Screen 6: conversation first, compact estimate and confirmation controls. */
+.log-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.log-heading h1 {
+  font-size: 28px;
+}
+.log-heading .subtitle {
+  margin-bottom: 12px;
+}
+.log-heading > .secondary {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  min-height: 36px;
+  font-size: 14px;
+}
+.chat-intake {
+  margin: 0 24px 20px;
+}
+.chat-intake summary {
+  color: #35577c;
+  cursor: pointer;
+  font-size: 14px;
+}
+.chat-intake .calorie-panel {
+  margin: 8px 0;
+}
+.chat-shell .chat {
+  padding: 0;
+}
+.chat-shell .bubble.assistant {
+  background: #eef1f3;
+  border-radius: 8px 8px 8px 2px;
+  padding: 10px 12px;
+  max-width: 94%;
+}
+.chat-shell .bubble.user {
+  background: #eef1f3;
+}
+.chat-shell .bubble p {
+  margin: 0;
+}
+.log-proposal {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-top: 16px;
+}
+.log-proposal h2 {
+  font-family: "DM Sans", sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0;
+  background: #eef1f3;
+  border-radius: 8px;
+  padding: 10px 12px;
+  width: fit-content;
+  margin: 0 0 12px;
+}
+.log-proposal .preview-food {
+  padding: 14px;
+  border: 1px solid #c5d3df;
+  border-radius: 6px;
+  margin-top: 10px;
+}
+.log-proposal .preview-food strong {
+  font-size: 16px;
+}
+.log-proposal .preview-food p {
+  font-size: 16px;
+  margin: 8px 0;
+}
+.log-proposal .food-nutrition {
+  border-top: 1px solid #d4dfe7;
+  padding-top: 10px;
+}
+.estimate-details summary {
+  font-size: 14px;
+  cursor: pointer;
+  color: #35577c;
+}
+.log-proposal .actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+.log-proposal .actions .primary {
+  grid-column: 1;
+  grid-row: 1;
+}
+.log-proposal .actions > button:last-child {
+  grid-column: 2;
+  grid-row: 1;
+  border: 1px solid #aec1d2;
+  border-radius: 6px;
+  padding: 10px 20px;
+  justify-content: center;
+  min-height: 40px;
+}
+.log-proposal .actions .dismiss-log {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 2px 0;
+  text-decoration: underline;
+}
+.log-proposal .confirmation-note {
+  color: #35577c;
+  font-size: 14px;
+  margin-top: 10px;
+}
+@media (max-width: 360px) {
+  .log-heading {
+    flex-wrap: wrap;
+  }
+}
+
+.calorie-panel {
+  align-items: start;
+}
+.chat-budget {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 0 24px 16px;
+  color: #35577c;
+  font-size: 14px;
+}
+.chat-budget .text-button {
+  padding: 0;
+}
+.shell {
+  padding-left: 0;
+  padding-right: 0;
+}
+.chat-shell .chat {
+  padding: 0 24px;
+}
+.chat-shell > .card,
+.chat-shell > .quick-actions,
+.chat-shell > .notice,
+.chat-shell > .error {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+@media (max-width: 360px) {
+  .chat-shell .chat {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .chat-shell > .card,
+  .chat-shell > .quick-actions,
+  .chat-shell > .notice,
+  .chat-shell > .error {
+    margin-left: 18px;
+    margin-right: 18px;
+  }
+}

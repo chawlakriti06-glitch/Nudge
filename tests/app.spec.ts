@@ -36,6 +36,21 @@ const seed = async (page: Page) => {
     .getByRole("button", { name: "Log food", exact: true })
     .click();
 };
+async function assertHomeIntake(
+  page: Page,
+  label: string,
+  attribute: string,
+  value: string,
+  arc = false,
+) {
+  const nav = page.getByRole("navigation", { name: "Main navigation" });
+  await nav.getByRole("button", { name: "Home", exact: true }).click();
+  const indicator = page.getByRole("progressbar", { name: label });
+  await expect(
+    arc ? indicator.locator(".calorie-progress") : indicator,
+  ).toHaveAttribute(attribute, value);
+  await nav.getByRole("button", { name: "Log food", exact: true }).click();
+}
 async function nutritionOverride(page: Page) {
   if (
     !(await page.getByLabel("Estimated calories", { exact: true }).isVisible())
@@ -306,14 +321,18 @@ test("confirmed AI preview is durable and applies once", async ({ page }) => {
   );
   await page.getByLabel("Message", { exact: true }).fill("I ate 2 samosas");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByText("Count this as eaten?")).toBeVisible();
+  await expect(
+    page.getByText("Here’s the estimate. Shall I add it?"),
+  ).toBeVisible();
   await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
   await page.reload();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Log food", exact: true })
     .click();
-  await expect(page.getByText("Count this as eaten?")).toBeVisible();
+  await expect(
+    page.getByText("Here’s the estimate. Shall I add it?"),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Confirm & log", exact: true })
     .click();
@@ -347,12 +366,8 @@ test("different days, nutrient totals and undo recalculate independently", async
   await page.getByLabel("Ledger date").fill("2026-01-01");
   await expect(page.getByText("130 kcal eaten · estimated")).toBeVisible();
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await expect(
-    page.getByRole("progressbar", { name: "Daily protein intake" }),
-  ).toHaveAttribute("aria-valuenow", "0");
-  await expect(
-    page.getByRole("progressbar", { name: "Daily fibre intake" }),
-  ).toHaveAttribute("aria-valuenow", "0");
+  await assertHomeIntake(page, "Daily protein intake", "aria-valuenow", "0");
+  await assertHomeIntake(page, "Daily fibre intake", "aria-valuenow", "0");
   await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await page.getByRole("button", { name: "Open food ledger" }).click();
@@ -425,8 +440,14 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   await seed(page);
   const ring = page.getByRole("progressbar", { name: "Daily calorie intake" });
   const arc = ring.locator(".calorie-progress");
-  await expect(ring).toHaveAttribute("aria-valuenow", "0");
-  await expect(arc).toHaveAttribute("stroke-dashoffset", "100");
+  await assertHomeIntake(page, "Daily calorie intake", "aria-valuenow", "0");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "stroke-dashoffset",
+    "100",
+    true,
+  );
   await page
     .locator(".quick-actions")
     .getByRole("button", { name: "Log food", exact: true })
@@ -435,12 +456,22 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   await page.getByLabel("Portion", { exact: true }).fill("1 plate");
   await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("900");
-  await expect(ring).toHaveAttribute("aria-valuenow", "0");
+  expect(
+    await page.evaluate(
+      () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods,
+    ),
+  ).toHaveLength(0);
   await page
     .getByRole("button", { name: "Confirm & log", exact: true })
     .click();
-  await expect(ring).toHaveAttribute("aria-valuenow", "50");
-  await expect(arc).toHaveAttribute("stroke-dashoffset", "50");
+  await assertHomeIntake(page, "Daily calorie intake", "aria-valuenow", "50");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "stroke-dashoffset",
+    "50",
+    true,
+  );
   await expect(
     page.getByText("900 kcal remaining", { exact: true }),
   ).toBeVisible();
@@ -449,21 +480,33 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   await nutritionOverride(page);
   await page.getByLabel("Estimated calories", { exact: true }).fill("450");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(ring).toHaveAttribute("aria-valuenow", "25");
-  await expect(arc).toHaveAttribute("stroke-dashoffset", "75");
+  await assertHomeIntake(page, "Daily calorie intake", "aria-valuenow", "25");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "stroke-dashoffset",
+    "75",
+    true,
+  );
   await page.getByRole("button", { name: "Open food ledger" }).click();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await expect(ring).toHaveAttribute("aria-valuenow", "0");
-  await expect(arc).toHaveAttribute("stroke-dashoffset", "100");
+  await assertHomeIntake(page, "Daily calorie intake", "aria-valuenow", "0");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "stroke-dashoffset",
+    "100",
+    true,
+  );
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(ring).toHaveAttribute("aria-valuenow", "25");
+  await assertHomeIntake(page, "Daily calorie intake", "aria-valuenow", "25");
   await page.reload();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Log food", exact: true })
     .click();
-  await expect(ring).toHaveAttribute("aria-valuenow", "25");
+  await assertHomeIntake(page, "Daily calorie intake", "aria-valuenow", "25");
 });
 test("menu operations do not clutter chat and prior internal prompts are removed", async ({
   page,
@@ -711,9 +754,12 @@ test("craving approval changes only today's dinner and confirmation updates thre
   await expect(
     page.getByRole("button", { name: "I ate it — log food" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("progressbar", { name: "Daily calorie intake" }),
-  ).toHaveAttribute("aria-valuetext", "1000 of 1800 kcal");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "aria-valuetext",
+    "1000 of 1800 kcal",
+  );
   const changed = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("nudge.local.v1")!),
   );
@@ -724,23 +770,35 @@ test("craving approval changes only today's dinner and confirmation updates thre
   ).toHaveLength(1);
   expect(changed.foods).toHaveLength(1);
   await page.getByRole("button", { name: "I ate it — log food" }).click();
-  await expect(
-    page.getByRole("progressbar", { name: "Daily calorie intake" }),
-  ).toHaveAttribute("aria-valuetext", "1250 of 1800 kcal");
-  await expect(
-    page.getByRole("progressbar", { name: "Daily protein intake" }),
-  ).toHaveAttribute("aria-valuetext", "35 of 60 g");
-  await expect(
-    page.getByRole("progressbar", { name: "Daily fibre intake" }),
-  ).toHaveAttribute("aria-valuetext", "13 of 25 g");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "aria-valuetext",
+    "1250 of 1800 kcal",
+  );
+  await assertHomeIntake(
+    page,
+    "Daily protein intake",
+    "aria-valuetext",
+    "35 of 60 g",
+  );
+  await assertHomeIntake(
+    page,
+    "Daily fibre intake",
+    "aria-valuetext",
+    "13 of 25 g",
+  );
   await page.reload();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Log food", exact: true })
     .click();
-  await expect(
-    page.getByRole("progressbar", { name: "Daily protein intake" }),
-  ).toHaveAttribute("aria-valuetext", "35 of 60 g");
+  await assertHomeIntake(
+    page,
+    "Daily protein intake",
+    "aria-valuetext",
+    "35 of 60 g",
+  );
   await page.screenshot({
     path: "/tmp/nudge-three-intake-rings.png",
     fullPage: true,
@@ -768,25 +826,57 @@ test("manual nutrient edits and deletion recalculate without treating unknown va
     name: "Daily protein intake",
   });
   const fibre = page.getByRole("progressbar", { name: "Daily fibre intake" });
-  await expect(protein).toHaveAttribute("aria-valuetext", "12 of 60 g");
-  await expect(fibre).toHaveAttribute("aria-valuetext", "8 of 25 g");
+  await assertHomeIntake(
+    page,
+    "Daily protein intake",
+    "aria-valuetext",
+    "12 of 60 g",
+  );
+  await assertHomeIntake(
+    page,
+    "Daily fibre intake",
+    "aria-valuetext",
+    "8 of 25 g",
+  );
   await page.getByRole("button", { name: "Open food ledger" }).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Protein (g)", { exact: true }).fill("15");
   await page.getByLabel("Fibre (g)", { exact: true }).fill("");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(protein).toHaveAttribute("aria-valuetext", "15 of 60 g");
-  await expect(fibre).toHaveAttribute(
+  await assertHomeIntake(
+    page,
+    "Daily protein intake",
+    "aria-valuetext",
+    "15 of 60 g",
+  );
+  await assertHomeIntake(
+    page,
+    "Daily fibre intake",
     "aria-valuetext",
     "0 of 25 g; 1 entries missing nutrition",
   );
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(fibre).toHaveAttribute("aria-valuetext", "8 of 25 g");
+  await assertHomeIntake(
+    page,
+    "Daily fibre intake",
+    "aria-valuetext",
+    "8 of 25 g",
+  );
   await page.getByRole("button", { name: "Open food ledger" }).click();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await expect(protein).toHaveAttribute("aria-valuetext", "0 of 60 g");
-  await expect(fibre).toHaveAttribute("aria-valuetext", "0 of 25 g");
+  await assertHomeIntake(
+    page,
+    "Daily protein intake",
+    "aria-valuetext",
+    "0 of 60 g",
+  );
+  await assertHomeIntake(
+    page,
+    "Daily fibre intake",
+    "aria-valuetext",
+    "0 of 25 g",
+  );
 });
 test("a dinner adjustment cannot overwrite intake changed since the suggestion", async ({
   page,
@@ -898,23 +988,35 @@ test("food logging estimates two eggs without asking for calories or using Gemin
     page.getByLabel("Estimated calories", { exact: true }),
   ).not.toBeVisible();
   await page.getByLabel("Food", { exact: true }).press("Enter");
+  await page.locator(".estimate-details summary").click();
   await expect(
     page.getByText("Standard food reference · estimated"),
   ).toBeVisible();
-  await expect(page.getByText("156 kcal est.")).toBeVisible();
-  expect(calls).toBe(0);
   await expect(
-    page.getByRole("progressbar", { name: "Daily calorie intake" }),
-  ).toHaveAttribute("aria-valuetext", "0 of 1800 kcal");
+    page.getByText("156 kcal · 12.6 g protein · 0 g fibre"),
+  ).toBeVisible();
+  expect(calls).toBe(0);
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "aria-valuetext",
+    "0 of 1800 kcal",
+  );
   await page
     .getByRole("button", { name: "Confirm & log", exact: true })
     .click();
-  await expect(
-    page.getByRole("progressbar", { name: "Daily calorie intake" }),
-  ).toHaveAttribute("aria-valuetext", "156 of 1800 kcal");
-  await expect(
-    page.getByRole("progressbar", { name: "Daily protein intake" }),
-  ).toHaveAttribute("aria-valuetext", "12.6 of 60 g");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "aria-valuetext",
+    "156 of 1800 kcal",
+  );
+  await assertHomeIntake(
+    page,
+    "Daily protein intake",
+    "aria-valuetext",
+    "12.6 of 60 g",
+  );
 });
 test("an unfamiliar food description opens AI review without typed nutrition", async ({
   page,
@@ -948,11 +1050,17 @@ test("an unfamiliar food description opens AI review without typed nutrition", a
     .click();
   await page.getByLabel("Food", { exact: true }).fill("1 katori chana chaat");
   await page.getByRole("button", { name: "Estimate & review" }).click();
-  await expect(page.getByText("Count this as eaten?")).toBeVisible();
-  await expect(page.getByText("200 kcal est.")).toBeVisible();
   await expect(
-    page.getByRole("progressbar", { name: "Daily calorie intake" }),
-  ).toHaveAttribute("aria-valuenow", "0");
+    page.getByText("Here’s the estimate. Shall I add it?"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("200 kcal · 9 g protein · 7 g fibre"),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/nudge-screen6-preview.png",
+    fullPage: true,
+  });
+  await assertHomeIntake(page, "Daily calorie intake", "aria-valuenow", "0");
 });
 test("confirmed extra food offers lunch and dinner review without double-counting intake", async ({
   page,
@@ -1034,9 +1142,12 @@ test("confirmed extra food offers lunch and dinner review without double-countin
   await page
     .getByRole("button", { name: "Approve lunch & dinner adjustment" })
     .click();
-  await expect(
-    page.getByRole("progressbar", { name: "Daily calorie intake" }),
-  ).toHaveAttribute("aria-valuetext", "250 of 1800 kcal");
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "aria-valuetext",
+    "250 of 1800 kcal",
+  );
   await expect(
     page.getByRole("button", { name: "I ate it — log food" }),
   ).toHaveCount(0);
@@ -1099,4 +1210,49 @@ test("chat input stays above navigation while reading a long conversation", asyn
     .getByRole("button", { name: "Menu", exact: true })
     .click();
   await expect(page.getByLabel("Message", { exact: true })).toHaveCount(0);
+});
+
+test("Home rings align despite missing nutrient captions and Log food has no rings", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    state.foods = [
+      {
+        id: "alignment",
+        date,
+        name: "Toast",
+        portion: "1 slice",
+        calories: 100,
+        assumptions: "Unknown nutrients",
+      },
+    ];
+    localStorage.setItem("nudge.local.v1", JSON.stringify(state));
+  });
+  await page.reload();
+  const rings = page.getByRole("progressbar");
+  await expect(rings).toHaveCount(3);
+  const boxes = await Promise.all(
+    [0, 1, 2].map((i) => rings.nth(i).boundingBox()),
+  );
+  expect(boxes.every((b) => b !== null)).toBe(true);
+  expect(
+    Math.max(...boxes.map((b) => b!.y)) - Math.min(...boxes.map((b) => b!.y)),
+  ).toBeLessThan(1);
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  await expect(page.getByRole("progressbar")).toHaveCount(0);
+  await expect(page.locator(".calorie-ring")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Help me plan", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Help me plan", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your weekly menu" }),
+  ).toBeVisible();
 });

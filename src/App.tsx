@@ -1487,59 +1487,31 @@ export default function App() {
       )}
       {screen === "home" && (
         <>
-          <div className="home-heading">
-            <h1>What did you eat?</h1>
-            <p className="subtitle">Food, cravings, or just a chat.</p>
-          </div>
-          <section className="calorie-panel">
-            <IntakeRing
-              label="Daily calorie intake"
-              title="Calories"
-              value={t.eaten}
-              target={p?.budget || 0}
-              unit="kcal"
-            />
-            <IntakeRing
-              label="Daily protein intake"
-              title="Protein"
-              value={t.protein.value}
-              target={p?.proteinTarget || 60}
-              unit="g"
-              unknown={t.protein.unknown}
-            />
-            <IntakeRing
-              label="Daily fibre intake"
-              title="Fibre"
-              value={t.fibre.value}
-              target={p?.fibreTarget || 25}
-              unit="g"
-              unknown={t.fibre.unknown}
-            />
-            <div className="remaining">
-              <span>
-                {t.remaining < 0
-                  ? `${Math.abs(t.remaining).toLocaleString()} kcal over budget`
-                  : `${t.remaining.toLocaleString()} kcal remaining`}
-              </span>
-              <button
-                onClick={() => {
-                  setLogDate(day);
-                  setLedger(true);
-                }}
-                aria-label="Open food ledger"
-              >
-                <NotebookText size={17} /> Ledger
-              </button>
+          <div className="home-heading log-heading">
+            <div>
+              <h1>What did you eat?</h1>
+              <p className="subtitle">Tell me the food and portion.</p>
             </div>
-          </section>
-          <div className="day-label">
-            TODAY{" "}
+            <button className="secondary" onClick={() => setScreen("menu")}>
+              Help me plan
+            </button>
+          </div>
+          <div className="chat-budget">
             <span>
-              {new Date().toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-              })}
+              {t.remaining < 0
+                ? `${Math.abs(t.remaining).toLocaleString()} kcal over budget`
+                : `${t.remaining.toLocaleString()} kcal remaining`}
             </span>
+            <button
+              className="text-button"
+              aria-label="Open food ledger"
+              onClick={() => {
+                setLogDate(day);
+                setLedger(true);
+              }}
+            >
+              Food log
+            </button>
           </div>
           {state.pending && (
             <div className="card pending">
@@ -1572,11 +1544,7 @@ export default function App() {
               <div className="chat-line">
                 <Logo small />
                 <div className="bubble assistant">
-                  <strong>A plan that fits your day.</strong>
-                  <p>
-                    Log what you ate, ask about a portion, or make room for
-                    something you fancy.
-                  </p>
+                  <p>What have you eaten?</p>
                 </div>
               </div>
             )}
@@ -1602,16 +1570,18 @@ export default function App() {
             <div ref={chatEnd} />
           </section>
           {proposal && (
-            <section className="card proposal">
-              <span className="eyebrow">
-                {proposal.kind === "log"
-                  ? "FOOD LOG PREVIEW"
-                  : "A LITTLE MENU ADJUSTMENT"}
-              </span>
-              {proposal.sourceLabel && <small>{proposal.sourceLabel}</small>}
+            <section
+              className={`card proposal ${proposal.kind === "log" ? "log-proposal" : ""}`}
+            >
+              {proposal.kind !== "log" && (
+                <span className="eyebrow">A LITTLE MENU ADJUSTMENT</span>
+              )}
+              {proposal.sourceLabel && proposal.kind !== "log" && (
+                <small>{proposal.sourceLabel}</small>
+              )}
               <h2>
                 {proposal.kind === "log"
-                  ? "Count this as eaten?"
+                  ? "Here’s the estimate. Shall I add it?"
                   : proposal.kind === "adjustment"
                     ? proposal.foods.length
                       ? "Make room for your craving?"
@@ -1621,15 +1591,17 @@ export default function App() {
               {proposal.kind === "log" ? (
                 proposal.foods.map((f, i) => (
                   <div className="preview-food" key={i}>
-                    <strong>
-                      {f.name} <span>{f.calories} kcal est.</span>
-                    </strong>
+                    <strong>{f.name}</strong>
                     <p>{f.portion}</p>
-                    <small>
-                      {f.protein ?? "unknown"} g protein ·{" "}
+                    <p className="food-nutrition">
+                      {f.calories} kcal · {f.protein ?? "unknown"} g protein ·{" "}
                       {f.fibre ?? "unknown"} g fibre
-                    </small>
-                    <small>{f.assumptions}</small>
+                    </p>
+                    <details className="estimate-details">
+                      <summary>Estimated values</summary>
+                      <p>{f.assumptions}</p>
+                      {proposal.sourceLabel && <p>{proposal.sourceLabel}</p>}
+                    </details>
                   </div>
                 ))
               ) : proposal.kind === "adjustment" ? (
@@ -1696,7 +1668,10 @@ export default function App() {
                       : "Review revised draft"}{" "}
                   <Check size={17} />
                 </button>
-                <button onClick={() => setProposal(null)}>
+                <button
+                  className={proposal.kind === "log" ? "dismiss-log" : ""}
+                  onClick={() => setProposal(null)}
+                >
                   {proposal.kind === "adjustment"
                     ? "Reject adjustment"
                     : proposal.kind === "log"
@@ -1738,10 +1713,15 @@ export default function App() {
                       setProposal(null);
                     }}
                   >
-                    Correct preview
+                    Edit
                   </button>
                 )}
               </div>
+              {proposal.kind === "log" && (
+                <p className="confirmation-note">
+                  Nothing is logged until you confirm.
+                </p>
+              )}
             </section>
           )}
           {!proposal &&

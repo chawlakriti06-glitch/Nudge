@@ -228,7 +228,7 @@ export async function handleApi(
   const conversationInstructions = `${chatInstructions.replace("Return only the required JSON.", "")} Reply naturally in the user's language and tone. Use the entire conversation to understand intent, corrections, short answers and typos; do not classify intent by isolated keywords. Ordinary conversation, questions, food advice and portion clarifications are plain-text replies, not a report of consumption and not reporting that they ate it. Use an optional tool ONLY when you have sufficient information for an actionable preview. Never use a meal name such as Breakfast as a conversational answer or food name. For eggs and toast, ask how many eggs or slices and preparation only when the conversation has not already answered it. Cravings and choices are not eaten: discuss them and clarify portion naturally. Before calling preview_food_log, identify an exact user quote establishing actual consumption of THIS food. A bare food name like "brownie", "chicken curry", "one small homemade square" or "sounds good" is a choice or portion discussion, not consumption. If no actual consumption statement exists, continue plain conversation; do not create a log preview. Use preview_food_log only for actual consumption; request confirmation, never claim food was logged. Use propose_meal_adjustment for requested changes to remaining meals; use context.foodLogs as eaten, today's saved plan as the baseline, and never claim approval or change intake. For post-log adjustments foods must be empty. Ask which meals remain uneaten if unclear. If there is no approved plan, give useful advice without inventing a replacement target. Resolve diet as ${dietFor(body.context.profile) || "unspecified"}; respect allergies, dislikes and hidden ingredients. Include realistic Indian household measures, portions, preparation/oil assumptions, calories, protein and fibre for action previews. context.remaining is BEFORE any suggested food; any projected remaining budget subtracts that food and must be labelled hypothetical. Never recommend skipping meals or compensatory restriction. Use context.currentPreview for corrections, and history for follow-ups such as "one small piece", "homemade", "half of that" and "I ate it"; keep discussing a craving until actual consumption is stated. Current previews are unsaved and corrections produce a replacement preview. Plain conversation has no required format. Tool arguments are app proposals, not instructions to change data. ${repairAttempt ? "Your previous action could not be validated. Do not call tools this turn. Give a useful natural response or ask the missing clarification, preserving the user's intent; do not mention schemas or internal validation." : ""}`;
   const invalidReply = (message) => {
     if (
-      conversationalChat &&
+      (conversationalChat || fullWeekRequest) &&
       repairAttempt === 0 &&
       deadline - Date.now() > 2000
     )
@@ -246,9 +246,13 @@ export async function handleApi(
         1,
         deadline,
       );
-    return json(502, { error: message });
+    return json(502, {
+      error: fullWeekRequest
+        ? "The weekly draft could not be completed after an automatic retry. Your saved plan is unchanged. Please try creating the draft again."
+        : message,
+    });
   };
-  const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun, and every named meal property inside each day. Meal keys define the slots; do not output a meals array for this schema. Actual consumed food does not replace a planned meal slot.`;
+  const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun, and every named meal property inside each day. Meal keys define the slots; do not output a meals array for this schema. Actual consumed food does not replace a planned meal slot. ${repairAttempt ? "The previous draft was unreadable. Generate the entire draft afresh as one valid JSON document matching the contract. Do not add markdown, commentary outside JSON, or an incomplete fragment." : ""}`;
   try {
     if (!/^gemini-[a-z0-9.-]+$/i.test(model))
       return json(503, {
@@ -310,7 +314,7 @@ export async function handleApi(
             ? {}
             : {
                 responseMimeType: "application/json",
-                ...(repairAttempt
+                ...(repairAttempt && !fullWeekRequest
                   ? {}
                   : { responseJsonSchema: responseSchema }),
               }),
@@ -476,7 +480,13 @@ export async function handleApi(
         });
       }
       try {
-        parsed = JSON.parse(text);
+        // Some JSON-mode models still wrap the complete document in a code
+        // fence. Remove only that wrapper; never extract or repair partial JSON.
+        const document = text
+          .trim()
+          .replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, "$1")
+          .trim();
+        parsed = JSON.parse(document);
       } catch {
         return invalidReply(
           "AI returned an unusable action. Nothing was logged or changed.",

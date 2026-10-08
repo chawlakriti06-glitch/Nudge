@@ -1404,3 +1404,138 @@ test("a food choice cannot become a log preview using fabricated consumption evi
   expect(r.status).toBe(200);
   expect(await r.json()).toMatchObject({ kind: "message", foods: [] });
 });
+
+const fourMealWeek = () => ({
+  message: "Your draft is ready for review.",
+  kind: "plan",
+  foods: [],
+  days: Object.fromEntries(
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => [
+      day,
+      {
+        meals: Object.fromEntries(
+          ["Breakfast", "Lunch", "Snacks", "Dinner"].map((slot) => [
+            slot,
+            {
+              name: `${day} ${slot} dal and rice`,
+              portion: "1 katori (150 g cooked)",
+              ingredients: ["dal", "rice", "5 ml oil"],
+              calories: 350,
+              protein: 12,
+              fibre: 5,
+              assumptions: "Estimated cooked portions including oil.",
+            },
+          ]),
+        ),
+      },
+    ]),
+  ),
+});
+test("four-meal weekly drafts accept a complete fenced JSON document", async () => {
+  const response = await handleApi(
+    request({
+      operation: "menu",
+      message: "Create my weekly draft",
+      context: { profile: { meals: 4 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              finishReason: "STOP",
+              content: {
+                parts: [
+                  {
+                    text:
+                      "```json\n" + JSON.stringify(fourMealWeek()) + "\n```",
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result.days).toHaveLength(7);
+  expect(
+    result.days.every(
+      (day: any) =>
+        day.meals.map((meal: any) => meal.slot).join(",") ===
+        "Breakfast,Lunch,Snacks,Dinner",
+    ),
+  ).toBe(true);
+});
+test("malformed four-meal drafts are regenerated once with the complete schema", async () => {
+  let attempts = 0;
+  const response = await handleApi(
+    request({
+      operation: "menu",
+      message: "Create my weekly draft",
+      context: { profile: { meals: 4 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async (_url: string, options: any) => {
+      attempts++;
+      const payload = JSON.parse(options.body);
+      expect(
+        payload.generationConfig.responseJsonSchema.properties.days.required,
+      ).toHaveLength(7);
+      if (attempts === 2)
+        expect(payload.systemInstruction.parts[0].text).toContain(
+          "Generate the entire draft afresh",
+        );
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              finishReason: "STOP",
+              content: {
+                parts: [
+                  {
+                    text:
+                      attempts === 1
+                        ? '{"kind":"plan",'
+                        : JSON.stringify(fourMealWeek()),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(attempts).toBe(2);
+  expect(response.status).toBe(200);
+  expect(
+    (await response.json()).days.flatMap((day: any) => day.meals),
+  ).toHaveLength(28);
+});
+test("repeated malformed weekly output never returns a partial draft", async () => {
+  let attempts = 0;
+  const response = await handleApi(
+    request({
+      operation: "menu",
+      message: "Create my weekly draft",
+      context: { profile: { meals: 4 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () => {
+      attempts++;
+      return new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: '{"kind":"plan",' }] } }],
+        }),
+      );
+    },
+  );
+  expect(attempts).toBe(2);
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({
+    error: expect.stringContaining("saved plan is unchanged"),
+  });
+});

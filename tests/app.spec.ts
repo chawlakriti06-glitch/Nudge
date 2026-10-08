@@ -1943,7 +1943,9 @@ test("Home food logs have illustrations while the planning card and saved intake
   await expect(
     page.getByRole("button", { name: "Plan my meals", exact: true }),
   ).toBeVisible();
-  await expect(page.locator(".food-log-illustration").getByRole("img")).toHaveCount(1);
+  await expect(
+    page.locator(".food-log-illustration").getByRole("img"),
+  ).toHaveCount(1);
   await page.setViewportSize({ width: 320, height: 568 });
   expect(
     await page.evaluate(
@@ -1961,4 +1963,83 @@ test("Home food logs have illustrations while the planning card and saved intake
   expect(state.foods).toHaveLength(1);
   expect(state.foods[0].calories).toBe(35);
   expect(state.plan).toEqual([]);
+});
+
+test("finished meals remove the stale readjustment card without changing intake", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
+      now.getDay()
+    ];
+    state.plan = [
+      {
+        day: weekday,
+        meals: ["Breakfast", "Lunch", "Dinner"].map((slot) => ({
+          slot,
+          name: "Dal rice",
+          portion: "1 bowl",
+          ingredients: ["dal", "rice"],
+          calories: 300,
+          protein: 10,
+          fibre: 4,
+          assumptions: "Home preparation",
+          approved: true,
+        })),
+      },
+    ];
+    state.mealReview = date;
+    localStorage.setItem("nudge.local.v1", JSON.stringify(state));
+  });
+  await page.reload();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Review remaining meals" }),
+  ).toBeVisible();
+  await page.route("**/api/chat", async (route) =>
+    route.fulfill({
+      json: {
+        kind: "message",
+        message: "All meals are done. A small bowl of kheer is about 220 kcal.",
+        completedSlots: ["Breakfast", "Lunch", "Dinner"],
+        foods: [],
+        days: [],
+        adjustments: [],
+      },
+    }),
+  );
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("I have had all 3 meals. What sweet can I have?");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(
+    page.getByText(
+      "All meals are done. A small bowl of kheer is about 220 kcal.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Review remaining meals" }),
+  ).toHaveCount(0);
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(saved.foods).toHaveLength(0);
+  expect(saved.plan[0].meals.every((meal: any) => meal.calories === 300)).toBe(
+    true,
+  );
+  await page.reload();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Review remaining meals" }),
+  ).toHaveCount(0);
 });

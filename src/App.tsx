@@ -767,6 +767,17 @@ export default function App() {
         food.menuDay === weekday &&
         food.menuSlot === meal.slot,
     );
+  const completedSlots = [
+    ...new Set([
+      ...(state.completedMeals?.date === day ? state.completedMeals.slots : []),
+      ...todayMeals.filter(wasEaten).map((meal) => meal.slot),
+    ]),
+  ];
+  const reviewableSlots = ["Lunch", "Dinner"].filter(
+    (slot) =>
+      todayMeals.some((meal) => meal.slot === slot) &&
+      !completedSlots.includes(slot),
+  );
   const nextMeal = todayMeals.find((meal) => !wasEaten(meal));
   const update = (patch: Partial<State>) =>
     setState((s) => ({ ...s, ...patch }));
@@ -829,6 +840,7 @@ export default function App() {
             },
             today: day,
             weekday: days[(new Date().getDay() + 6) % 7],
+            completedSlots,
             foodLogs: state.foods.filter((f) => f.date === day),
             nutrients: { protein: t.protein, fibre: t.fibre },
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -870,6 +882,14 @@ export default function App() {
         throw Error(
           "A planning request cannot be logged as intake. Please retry.",
         );
+      if (result.completedSlots.length)
+        setState((s) => ({
+          ...s,
+          completedMeals: {
+            date: day,
+            slots: [...new Set([...completedSlots, ...result.completedSlots])],
+          },
+        }));
       if (source === "chat")
         setState((s) => ({
           ...s,
@@ -2064,6 +2084,7 @@ export default function App() {
           {!proposal &&
             !busy &&
             state.mealReview === day &&
+            reviewableSlots.length > 0 &&
             state.plan.some(
               (d) => d.day === days[(new Date().getDay() + 6) % 7],
             ) && (
@@ -2078,26 +2099,47 @@ export default function App() {
                     className="primary"
                     onClick={() =>
                       ask(
-                        "Please readjust today's lunch and dinner around what I've eaten.",
+                        `Please review today's remaining ${reviewableSlots.join(" and ").toLowerCase()} around my confirmed food. Ask if you need to know whether a meal is already eaten.`,
                         "chat",
                         undefined,
-                        { adjustmentSlots: ["Lunch", "Dinner"] },
+                        { adjustmentSlots: reviewableSlots },
                       )
                     }
                   >
-                    Review lunch & dinner
+                    Review {reviewableSlots.join(" & ").toLowerCase()}
                   </button>
+                  {reviewableSlots.length > 1 && (
+                    <button
+                      onClick={() => {
+                        update({
+                          completedMeals: {
+                            date: day,
+                            slots: [...new Set([...completedSlots, "Lunch"])],
+                          },
+                        });
+                        ask(
+                          "Please readjust tonight's dinner around what I've eaten. Lunch is already done.",
+                          "chat",
+                          undefined,
+                          { adjustmentSlots: ["Dinner"] },
+                        );
+                      }}
+                    >
+                      Only dinner remains
+                    </button>
+                  )}
                   <button
                     onClick={() =>
-                      ask(
-                        "Please readjust tonight's dinner around what I've eaten. Lunch is already done.",
-                        "chat",
-                        undefined,
-                        { adjustmentSlots: ["Dinner"] },
-                      )
+                      update({
+                        completedMeals: {
+                          date: day,
+                          slots: todayMeals.map((meal) => meal.slot),
+                        },
+                        mealReview: "",
+                      })
                     }
                   >
-                    Only dinner remains
+                    I've finished today's meals
                   </button>
                   <button onClick={() => update({ mealReview: "" })}>
                     Keep my menu

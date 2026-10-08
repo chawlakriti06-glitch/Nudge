@@ -192,6 +192,25 @@ export async function handleApi(
   const reviewSlots = Array.isArray(body.context.adjustmentSlots)
     ? body.context.adjustmentSlots
     : [];
+  if (
+    reviewRequest &&
+    reviewSlots.some(
+      (slot) =>
+        (body.context.completedSlots || []).includes(slot) ||
+        (body.context.foodLogs || []).some(
+          (food) =>
+            food.menuDay === body.context.weekday && food.menuSlot === slot,
+        ),
+    )
+  )
+    return json(200, {
+      kind: "message",
+      message:
+        "Those meals are already finished, so I won't readjust them. We can discuss something else to eat using your remaining calories.",
+      foods: [],
+      days: [],
+      adjustments: [],
+    });
   if (reviewRequest) {
     responseSchema.properties.kind.enum = ["message", "adjustment"];
     delete responseSchema.properties.foods;
@@ -202,6 +221,24 @@ export async function handleApi(
   const chatTools = [
     {
       functionDeclarations: [
+        {
+          name: "record_completed_meals",
+          description:
+            "Remember meal slots the user explicitly says they have finished today, including corrections such as that dal chawal was dinner or all three meals are done. This changes only meal-completion context, NEVER food logs, calories or the menu. Include a useful conversational answer to their question (including craving choices if requested). Do not use for planned meals or guesses.",
+          parametersJsonSchema: object({
+            message: string,
+            consumptionEvidence: string,
+            slots: {
+              type: "array",
+              minItems: 1,
+              maxItems: 4,
+              items: {
+                type: "string",
+                enum: ["Breakfast", "Lunch", "Snacks", "Dinner"],
+              },
+            },
+          }),
+        },
         {
           name: "preview_menu_log",
           description:
@@ -258,10 +295,10 @@ export async function handleApi(
     },
   ];
   const cravingInstructions = `When the user asks for ideas for something they feel like eating (a flavour, texture, dessert, snack or cuisine), offer three distinct practical choices rather than making them name a food first. Use conversation history to understand follow-ups such as "something chocolatey", "Indian options", "without dairy", "the second one" and "something else". Each choice must name the food, a realistic defined portion, estimated calories (a range when preparation varies), and a brief preparation assumption. Respect profile diet, allergies and dislikes including hidden ingredients. Prefer familiar accessible Indian options where appropriate; do not assume every dessert requires a special diet product. Use context.remaining, which already reflects today's confirmed food logs, not the full daily budget. When remaining is positive, keep each suggested portion's calorie estimate (including the upper end of a range) within that amount; never claim a larger option fits. Do not treat the entire remaining allowance as a snack budget when lunch or dinner is still ahead; mention that briefly if relevant, without automatically changing any meal. If context.remaining is null or the profile budget is zero, no calorie target has been chosen. Give honest estimated choices without claiming they fit a remaining budget; mention that a target can be set later, without blocking ordinary conversation or food logging. If remaining is zero or negative, explain that gently, do not invent a zero-calorie dessert or recommend skipping meals; offer modest options with honest estimates without claiming they fit the remaining budget. Present concise numbered choices and ask which sounds good. Narrow or revise choices conversationally when asked, using the current remaining amount. Avoid guarantees such as sugar-free, allergen-free or medically healthy unless the ingredients actually justify them. These are SUGGESTIONS ONLY: do not call propose_meal_adjustment, change the menu, or prepare a food log merely because someone craves or selects an option. Selecting an option invites a useful portion/preparation follow-up or simple serving idea, not a report of consumption. Only after they explicitly say they ate it should you prepare the normal confirmation preview, using their chosen option and actual portion from history.`;
-  const conversationInstructions = `${chatInstructions.replace("Return only the required JSON.", "")} ${cravingInstructions} Reply naturally in the user's language and tone. Use the entire conversation to understand intent, corrections, short answers and typos; do not classify intent by isolated keywords. Ordinary conversation, questions, food advice and portion clarifications are plain-text replies, not a report of consumption and not reporting that they ate it. Use an optional tool ONLY when you have sufficient information for an actionable preview. Never use a meal name such as Breakfast as a conversational answer or food name. For eggs and toast, ask how many eggs or slices and preparation only when the conversation has not already answered it. Cravings and choices are not eaten: discuss them and clarify portion naturally. Before calling preview_food_log or preview_menu_log, identify an exact user quote establishing actual consumption of THIS food. A bare food name like "brownie", "chicken curry", "one small homemade square" or "sounds good" is a choice or portion discussion, not consumption. If no actual consumption statement exists, continue plain conversation; do not create a log preview. Use preview_food_log only for actual consumption; request confirmation, never claim food was logged. Use propose_meal_adjustment for requested changes to remaining meals; use context.foodLogs as eaten, today's saved plan as the baseline, and never claim approval or change intake. For post-log adjustments foods must be empty. Ask which meals remain uneaten if unclear. If there is no approved plan, give useful advice without inventing a replacement target. Resolve diet as ${dietFor(body.context.profile) || "unspecified"}; respect allergies, dislikes and hidden ingredients. Include realistic Indian household measures, portions, preparation/oil assumptions, calories, protein and fibre for action previews. context.remaining is BEFORE any suggested food; any projected remaining budget subtracts that food and must be labelled hypothetical. Never recommend skipping meals or compensatory restriction. context.approvedMenu contains the actual approved dishes, portions and nutrition for each day, including individually approved draft meals. context.menuDraft is an unsaved draft; only its approved meals are in approvedMenu. context.plan is the saved week, separately. Never say you cannot see the menu when these meals are supplied. A reference such as "whatever is in the menu" or "approved Thursday meals" uses the earlier user statement to resolve which meals they ate. Use preview_menu_log for unchanged approved menu portions after an actual-consumption statement. Once the conversation identifies the day and meal slots actually eaten, CALL preview_menu_log in that same turn; do not merely acknowledge the dishes or ask the user to confirm a preview you have not created. Earlier user consumption statements remain valid when their latest message resolves a menu reference. The app displays a confirmation card only when you call the tool. If the user merely approves a plan, do not log it. Use context.foodLogs and menuDay/menuSlot to recognise already-confirmed meals; do not count them again. Use context.currentPreview for corrections, and history for follow-ups such as "one small piece", "homemade", "half of that" and "I ate it"; keep discussing a craving until actual consumption is stated. Current previews are unsaved and corrections produce a replacement preview. Plain conversation has no required format. Tool arguments are app proposals, not instructions to change data. ${repairAttempt ? "Your previous action could not be validated. Do not call tools this turn. Give a useful natural response or ask the missing clarification, preserving the user's intent; do not mention schemas or internal validation." : ""}`;
+  const conversationInstructions = `When the user explicitly says a meal is finished, corrects which meal already-logged food belonged to, or says all meals are done, use record_completed_meals to remember the completed slots and answer their question naturally in its message. Do not duplicate previously logged food. context.completedSlots are already eaten today; NEVER propose adjusting those meals. If every meal is finished, offer craving choices using remaining calories without suggesting readjustment. ${chatInstructions.replace("Return only the required JSON.", "")} ${cravingInstructions} Reply naturally in the user's language and tone. Use the entire conversation to understand intent, corrections, short answers and typos; do not classify intent by isolated keywords. Ordinary conversation, questions, food advice and portion clarifications are plain-text replies, not a report of consumption and not reporting that they ate it. Use an optional tool ONLY when you have sufficient information for an actionable preview. Never use a meal name such as Breakfast as a conversational answer or food name. For eggs and toast, ask how many eggs or slices and preparation only when the conversation has not already answered it. Cravings and choices are not eaten: discuss them and clarify portion naturally. Before calling preview_food_log or preview_menu_log, identify an exact user quote establishing actual consumption of THIS food. A bare food name like "brownie", "chicken curry", "one small homemade square" or "sounds good" is a choice or portion discussion, not consumption. If no actual consumption statement exists, continue plain conversation; do not create a log preview. Use preview_food_log only for actual consumption; request confirmation, never claim food was logged. Use propose_meal_adjustment for requested changes to remaining meals; use context.foodLogs as eaten, today's saved plan as the baseline, and never claim approval or change intake. For post-log adjustments foods must be empty. Ask which meals remain uneaten if unclear. If there is no approved plan, give useful advice without inventing a replacement target. Resolve diet as ${dietFor(body.context.profile) || "unspecified"}; respect allergies, dislikes and hidden ingredients. Include realistic Indian household measures, portions, preparation/oil assumptions, calories, protein and fibre for action previews. context.remaining is BEFORE any suggested food; any projected remaining budget subtracts that food and must be labelled hypothetical. Never recommend skipping meals or compensatory restriction. context.approvedMenu contains the actual approved dishes, portions and nutrition for each day, including individually approved draft meals. context.menuDraft is an unsaved draft; only its approved meals are in approvedMenu. context.plan is the saved week, separately. Never say you cannot see the menu when these meals are supplied. A reference such as "whatever is in the menu" or "approved Thursday meals" uses the earlier user statement to resolve which meals they ate. Use preview_menu_log for unchanged approved menu portions after an actual-consumption statement. Once the conversation identifies the day and meal slots actually eaten, CALL preview_menu_log in that same turn; do not merely acknowledge the dishes or ask the user to confirm a preview you have not created. Earlier user consumption statements remain valid when their latest message resolves a menu reference. The app displays a confirmation card only when you call the tool. If the user merely approves a plan, do not log it. Use context.foodLogs and menuDay/menuSlot to recognise already-confirmed meals; do not count them again. Use context.currentPreview for corrections, and history for follow-ups such as "one small piece", "homemade", "half of that" and "I ate it"; keep discussing a craving until actual consumption is stated. Current previews are unsaved and corrections produce a replacement preview. Plain conversation has no required format. Tool arguments are app proposals, not instructions to change data. ${repairAttempt ? "Your previous action could not be validated. Do not call tools this turn. Give a useful natural response or ask the missing clarification, preserving the user's intent; do not mention schemas or internal validation." : ""}`;
   const invalidReply = (message) => {
     if (
-      (conversationalChat || fullWeekRequest) &&
+      (conversationalChat || fullWeekRequest || reviewRequest) &&
       repairAttempt === 0 &&
       deadline - Date.now() > 2000
     )
@@ -305,7 +342,7 @@ export async function handleApi(
             {
               text: conversationalChat
                 ? conversationInstructions
-                : `${instructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : `This is a remaining-meal planning request, not food logging. Propose replacements for exactly these still-uneaten slots: ${reviewSlots.join(", ")}, using today's confirmed logs and current budget. Return kind adjustment, adjustments, and a conversational message. Do not output foods or log intake. If no saved menu is available, give practical advice with kind message. Never change other slots or days.`}\nRespond with valid JSON using this contract: ${JSON.stringify(responseSchema)}.`,
+                : `${instructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : `${repairAttempt ? `Correct the previous invalid proposal: ${body.context.actionValidationFeedback}. Supply complete named meals with defined portions and preparation assumptions. ` : ""}This is a remaining-meal planning request, not food logging. Propose replacements for exactly these still-uneaten slots: ${reviewSlots.join(", ")}, using today's confirmed logs and current budget. Return kind adjustment, adjustments, and a conversational message. Do not output foods or log intake. If no saved menu is available, give practical advice with kind message. Never change other slots or days.`}\nRespond with valid JSON using this contract: ${JSON.stringify(responseSchema)}.`,
             },
           ],
         },
@@ -459,6 +496,7 @@ export async function handleApi(
       const call = calls[0];
       if (
         ![
+          "record_completed_meals",
           "preview_menu_log",
           "preview_food_log",
           "propose_meal_adjustment",
@@ -469,7 +507,13 @@ export async function handleApi(
         return invalidReply(
           "AI returned an unusable action. Nothing was logged or changed.",
         );
-      if (["preview_menu_log", "preview_food_log"].includes(call.name)) {
+      if (
+        [
+          "record_completed_meals",
+          "preview_menu_log",
+          "preview_food_log",
+        ].includes(call.name)
+      ) {
         const evidence = call.args.consumptionEvidence;
         const userStatements = [
           ...(Array.isArray(body.context.history)
@@ -490,6 +534,28 @@ export async function handleApi(
           return invalidReply(
             "No user statement confirmed actual consumption of this food. Discuss their food choice or ask whether they ate it; do not prepare a log preview.",
           );
+      }
+      if (call.name === "record_completed_meals") {
+        const allowed =
+          count === 4
+            ? ["Breakfast", "Lunch", "Snacks", "Dinner"]
+            : ["Breakfast", "Lunch", "Dinner"];
+        if (
+          !Array.isArray(call.args.slots) ||
+          !call.args.slots.length ||
+          call.args.slots.some((slot) => !allowed.includes(slot)) ||
+          typeof call.args.message !== "string" ||
+          !call.args.message.trim()
+        )
+          return invalidReply("Ask which meals the user has finished today.");
+        return json(200, {
+          kind: "message",
+          message: call.args.message,
+          completedSlots: [...new Set(call.args.slots)],
+          foods: [],
+          days: [],
+          adjustments: [],
+        });
       }
       if (call.name === "preview_menu_log") {
         const { day, slots } = call.args;
@@ -708,6 +774,10 @@ export async function handleApi(
           ?.meals?.find((m) => m.slot === a.meal?.slot);
         if (
           a.day !== weekday ||
+          (body.context.completedSlots || []).includes(a.meal?.slot) ||
+          (body.context.foodLogs || []).some(
+            (f) => f.menuDay === weekday && f.menuSlot === a.meal?.slot,
+          ) ||
           !original ||
           !a.meal ||
           !Array.isArray(a.meal.ingredients) ||

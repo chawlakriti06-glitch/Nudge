@@ -84,6 +84,7 @@ export type State = {
   pending: string;
   proposal?: Proposal | null;
   mealReview?: string;
+  completedMeals?: { date: string; slots: string[] };
 };
 export const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export const slots = (count: number) =>
@@ -219,6 +220,7 @@ export function validateResponse(raw: unknown, p: Profile) {
     foods: unknown;
     days: unknown;
     adjustments?: unknown;
+    completedSlots?: unknown;
   };
   if (
     typeof r.message !== "string" ||
@@ -319,7 +321,14 @@ export function validateResponse(raw: unknown, p: Profile) {
       }
     }
   }
+  if (
+    r.completedSlots !== undefined &&
+    (!Array.isArray(r.completedSlots) ||
+      r.completedSlots.some((slot) => !slots(p.meals).includes(slot)))
+  )
+    throw Error("Invalid completed meal details.");
   return {
+    completedSlots: (r.completedSlots || []) as string[],
     message: r.message,
     kind: r.kind as "message" | "log" | "plan" | "adjustment",
     adjustments: (r.adjustments || []) as NonNullable<Proposal["adjustments"]>,

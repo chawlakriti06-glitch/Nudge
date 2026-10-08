@@ -1706,3 +1706,184 @@ test("weekly planning without a chosen target asks for setup without calling Gem
     message: expect.stringContaining("Choose your calorie target"),
   });
 });
+
+test("completed meal context answers cravings without logging or changing meals", async () => {
+  const body = {
+    operation: "chat",
+    message: "I have had all 3 meals today. What sweet can I have?",
+    context: {
+      profile: { meals: 3 },
+      today: "2026-10-08",
+      weekday: "Thu",
+      eaten: 950,
+      remaining: 550,
+    },
+  };
+  const response = await handleApi(
+    request(body),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    functionCall: {
+                      name: "record_completed_meals",
+                      args: {
+                        consumptionEvidence: "I have had all 3 meals today",
+                        slots: ["Breakfast", "Lunch", "Dinner"],
+                        message:
+                          "All meals are finished. Try a small bowl of kheer, approximately 220 kcal.",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    kind: "message",
+    completedSlots: ["Breakfast", "Lunch", "Dinner"],
+    foods: [],
+    adjustments: [],
+  });
+});
+
+test("completed meal status requires a real user statement", async () => {
+  let calls = 0;
+  const response = await handleApi(
+    request({
+      operation: "chat",
+      message: "I want dinner",
+      context: { profile: { meals: 3 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts:
+                  calls === 1
+                    ? [
+                        {
+                          functionCall: {
+                            name: "record_completed_meals",
+                            args: {
+                              consumptionEvidence: "I ate dinner",
+                              slots: ["Dinner"],
+                              message: "Done",
+                            },
+                          },
+                        },
+                      ]
+                    : [{ text: "What would you like for dinner?" }],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(response.status).toBe(200);
+  expect((await response.json()).completedSlots).toBeUndefined();
+  expect(calls).toBe(2);
+});
+
+test("a finished dinner cannot be readjusted, even by a stale review button", async () => {
+  const response = await handleApi(
+    request({
+      operation: "adjustment",
+      message: "Readjust dinner",
+      context: {
+        profile: { meals: 3 },
+        weekday: "Thu",
+        completedSlots: ["Dinner"],
+        adjustmentSlots: ["Dinner"],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () => {
+      throw Error("Should not request a finished-meal replacement");
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    kind: "message",
+    foods: [],
+    adjustments: [],
+  });
+});
+
+test("an invalid dinner review retries the provider before returning a complete proposal", async () => {
+  const dinner = {
+    slot: "Dinner",
+    name: "Dal and rice",
+    portion: "1 katori dal, half katori rice",
+    ingredients: ["dal", "rice"],
+    calories: 300,
+    protein: 12,
+    fibre: 5,
+    assumptions: "Home-cooked with 1 tsp oil",
+    approved: true,
+  };
+  let calls = 0;
+  const response = await handleApi(
+    request({
+      operation: "adjustment",
+      message: "Readjust dinner",
+      context: {
+        profile: { meals: 3 },
+        today: "2026-10-08",
+        weekday: "Thu",
+        adjustmentSlots: ["Dinner"],
+        plan: [{ day: "Thu", meals: [dinner] }],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify(
+                      calls === 1
+                        ? {
+                            kind: "adjustment",
+                            message: "Dinner",
+                            adjustments: [],
+                          }
+                        : {
+                            kind: "adjustment",
+                            message: "Here is a lighter dinner to review.",
+                            adjustments: [{ day: "Thu", meal: dinner }],
+                          },
+                    ),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(response.status).toBe(200);
+  expect((await response.json()).adjustments[0].meal.portion).toBe(
+    dinner.portion,
+  );
+  expect(calls).toBe(2);
+});

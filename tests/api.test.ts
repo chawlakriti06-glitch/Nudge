@@ -321,7 +321,7 @@ test.each([3, 4])(
             days.map((day) => [
               day,
               {
-                day,
+                day: "Mon", // Named keys are authoritative, even if nested labels repeat.
                 meals: slots.map((slot) => ({
                   slot,
                   name: "Meal",

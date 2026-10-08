@@ -45,9 +45,21 @@ const initialProfile: Profile = {
   cycle: false,
 };
 const uid = () => crypto.randomUUID();
+const internalMenuPrompt = (text: string) =>
+  /^Generate a complete seven-day draft menu with [34] meals per day, respecting all preferences, dislikes and allergies, around /i.test(
+    text,
+  ) ||
+  /^Swap (Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Breakfast|Lunch|Snacks|Dinner)\. Return a complete revised seven-day draft,/i.test(
+    text,
+  );
 function read() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || "null");
+    if (s && Array.isArray(s.chat))
+      s.chat = s.chat.filter(
+        (c: { role: string; text: string }) =>
+          !(c.role === "user" && internalMenuPrompt(c.text)),
+      );
     return s && Array.isArray(s.foods) && Array.isArray(s.chat)
       ? (s as State)
       : emptyState();
@@ -522,7 +534,7 @@ export default function App() {
   const paused = state.paused === day;
   const update = (patch: Partial<State>) =>
     setState((s) => ({ ...s, ...patch }));
-  const ask = async (message: string) => {
+  const ask = async (message: string, source: "chat" | "menu" = "chat") => {
     if (lock.current || !p || !message.trim()) return;
     if (/^i (?:don['’]t|do not) care today[.!]?$/i.test(message.trim())) {
       setState((s) => ({
@@ -537,17 +549,20 @@ export default function App() {
     lock.current = true;
     setBusy(true);
     setError("");
-    setText("");
-    setState((s) => ({
-      ...s,
-      chat: [...s.chat, { id: uid(), role: "user", text: message }],
-    }));
+    if (source === "chat") {
+      setText("");
+      setState((s) => ({
+        ...s,
+        chat: [...s.chat, { id: uid(), role: "user", text: message }],
+      }));
+    }
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
+          operation: source,
           context: {
             profile: {
               ...p,
@@ -574,13 +589,14 @@ export default function App() {
         throw Error(
           "A planning request cannot be logged as intake. Please retry.",
         );
-      setState((s) => ({
-        ...s,
-        chat: [
-          ...s.chat,
-          { id: uid(), role: "assistant", text: result.message },
-        ],
-      }));
+      if (source === "chat")
+        setState((s) => ({
+          ...s,
+          chat: [
+            ...s.chat,
+            { id: uid(), role: "assistant", text: result.message },
+          ],
+        }));
       if (result.kind !== "message")
         setProposal({
           kind: result.kind,
@@ -778,6 +794,7 @@ export default function App() {
           onClick={() =>
             ask(
               `Swap ${d} ${m.slot}. Return a complete revised seven-day draft, preserving other meals and all exclusions.`,
+              "menu",
             )
           }
         >
@@ -1186,6 +1203,7 @@ export default function App() {
             onClick={() =>
               ask(
                 `Generate a complete seven-day draft menu with ${p?.meals} meals per day, respecting all preferences, dislikes and allergies, around ${p?.budget} kcal/day. Include oil and visible nutrition assumptions.`,
+                "menu",
               )
             }
           >

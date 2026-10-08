@@ -130,6 +130,7 @@ export async function handleApi(
   daySchema.properties.meals.items.properties.slot.enum = mealSlots;
   responseSchema.properties.days.maxItems = 7;
   const fullWeekRequest =
+    body.operation === "menu" ||
     /seven[ -]day|complete revised|generate.*(?:menu|week)/i.test(body.message);
   if (fullWeekRequest) {
     responseSchema.properties.kind.enum = ["plan"];
@@ -239,7 +240,7 @@ export async function handleApi(
           error:
             "Gemini omitted a required day. Your saved plan is unchanged; retry the complete draft.",
         });
-      parsed.days = weekDays.map((day) => parsed.days[day]);
+      parsed.days = weekDays.map((day) => ({ ...parsed.days[day], day }));
     }
     if (
       !parsed ||
@@ -296,8 +297,7 @@ export async function handleApi(
         !weekDays.every((day) => parsed.days.some((d) => d.day === day))
       )
         return json(502, {
-          error:
-            "Gemini did not return a complete seven-day menu. Your saved plan is unchanged; retry the draft.",
+          error: `Gemini returned ${parsed.days.length} days; missing: ${weekDays.filter((day) => !parsed.days.some((d) => d.day === day)).join(", ") || "none (duplicate days)"}. Your saved plan is unchanged. Please retry the draft.`,
         });
       parsed.days.sort(
         (a, b) => weekDays.indexOf(a.day) - weekDays.indexOf(b.day),

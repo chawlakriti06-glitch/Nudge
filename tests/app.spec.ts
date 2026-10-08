@@ -382,3 +382,33 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   await page.reload();
   await expect(ring).toHaveAttribute("aria-valuenow", "25");
 });
+test("menu operations do not clutter chat and prior internal prompts are removed", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    s.chat = [
+      {
+        id: "old",
+        role: "user",
+        text: "Generate a complete seven-day draft menu with 3 meals per day, respecting all preferences, dislikes and allergies, around 1800 kcal/day. Include oil and visible nutrition assumptions.",
+      },
+      { id: "real", role: "user", text: "I want soup" },
+    ];
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await expect(page.locator(".bubble.user")).toHaveCount(1);
+  await page.route("**/api/chat", async (r) => {
+    expect(r.request().postDataJSON().operation).toBe("menu");
+    await r.fulfill({ status: 502, json: { error: "Fixture error" } });
+  });
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
+  await page.getByRole("button", { name: "Create my weekly draft" }).click();
+  await expect(page.getByRole("alert")).toContainText("Fixture error");
+  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await expect(page.locator(".bubble.user")).toHaveCount(1);
+  await expect(page.locator(".bubble.user")).toContainText("I want soup");
+});

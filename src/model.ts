@@ -25,6 +25,8 @@ export type Food = {
   protein?: number | null;
   fibre?: number | null;
   assumptions: string;
+  menuDay?: string;
+  menuSlot?: string;
 };
 export type Meal = {
   slot: string;
@@ -38,6 +40,19 @@ export type Meal = {
   approved: boolean;
 };
 export type Day = { day: string; meals: Meal[] };
+// Approved draft meals can be referred to in chat before the whole week is
+// saved. Unapproved draft meals must not hide the user's saved menu.
+export function approvedMenu(plan: Day[], draft: Day[]): Day[] {
+  return days
+    .map((day) => {
+      const meals = new Map<string, Meal>();
+      for (const source of [plan, draft])
+        for (const meal of source.find((d) => d.day === day)?.meals || [])
+          if (meal.approved) meals.set(meal.slot, meal);
+      return { day, meals: [...meals.values()] };
+    })
+    .filter((d) => d.meals.length);
+}
 export type Proposal = {
   kind: "log" | "plan" | "adjustment";
   date?: string;

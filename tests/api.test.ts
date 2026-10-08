@@ -517,7 +517,9 @@ test("food previews use an optional action tool and omit full-week instructions"
         "i had 2 eggs and 1 bread toast. how many calories is that?",
       );
       expect(
-        sent.tools[0].functionDeclarations[0].parametersJsonSchema.required,
+        sent.tools[0].functionDeclarations.find(
+          (f: any) => f.name === "preview_food_log",
+        ).parametersJsonSchema.required,
       ).not.toContain("days");
       expect(sent.systemInstruction.parts[0].text).not.toContain(
         "Return the complete revised week. When the schema",
@@ -643,9 +645,11 @@ test("unsupported tools retry a conversational reply on the same model without c
       const payload = JSON.parse(init.body as string);
       calls++;
       if (calls === 1) {
-        expect(payload.tools[0].functionDeclarations[0].name).toBe(
-          "preview_food_log",
-        );
+        expect(
+          payload.tools[0].functionDeclarations.find(
+            (f: any) => f.name === "preview_food_log",
+          ).name,
+        ).toBe("preview_food_log");
         return new Response(
           JSON.stringify({
             error: { message: "Request contains an invalid argument" },
@@ -984,9 +988,11 @@ test("actual consumption after lunch advice still requests a validated food prev
     async (_url: string, init: RequestInit) => {
       const payload = JSON.parse(init.body as string);
       expect(payload.generationConfig).not.toHaveProperty("responseMimeType");
-      expect(payload.tools[0].functionDeclarations[0].name).toBe(
-        "preview_food_log",
-      );
+      expect(
+        payload.tools[0].functionDeclarations.find(
+          (f: any) => f.name === "preview_food_log",
+        ).name,
+      ).toBe("preview_food_log");
       return new Response(
         JSON.stringify({
           candidates: [
@@ -1539,3 +1545,140 @@ test("repeated malformed weekly output never returns a partial draft", async () 
     error: expect.stringContaining("saved plan is unchanged"),
   });
 });
+
+test("approved menu consumption resolves exact dishes and nutrition instead of AI estimates", async () => {
+  const planned = {
+    slot: "Breakfast",
+    name: "Poha",
+    portion: "1 katori (150 g)",
+    ingredients: ["rice flakes", "oil"],
+    calories: 310,
+    protein: 7,
+    fibre: 4,
+    assumptions: "Includes 5 ml oil",
+    approved: true,
+  };
+  const response = await handleApi(
+    request({
+      operation: "chat",
+      message: "Approved Thursday meals",
+      context: {
+        profile: { meals: 4 },
+        weekday: "Thu",
+        plan: [],
+        approvedMenu: [
+          {
+            day: "Thu",
+            meals: [
+              planned,
+              { ...planned, slot: "Lunch", name: "Rajma rice", calories: 450 },
+            ],
+          },
+        ],
+        history: [
+          { role: "user", text: "I ate my planned breakfast and lunch" },
+        ],
+        foodLogs: [],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    functionCall: {
+                      name: "preview_menu_log",
+                      args: {
+                        message:
+                          "Here are your approved breakfast and lunch. Confirm to log them.",
+                        consumptionEvidence:
+                          "I ate my planned breakfast and lunch",
+                        day: "Thu",
+                        slots: ["Breakfast", "Lunch"],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result.kind).toBe("log");
+  expect(
+    result.foods.map((f: any) => [f.name, f.calories, f.menuDay, f.menuSlot]),
+  ).toEqual([
+    ["Poha", 310, "Thu", "Breakfast"],
+    ["Rajma rice", 450, "Thu", "Lunch"],
+  ]);
+});
+test.each(["unapproved", "already logged"])(
+  "menu log tool refuses %s meals",
+  async (mode) => {
+    let calls = 0;
+    const meal = {
+      slot: "Breakfast",
+      name: "Poha",
+      portion: "1 bowl",
+      ingredients: ["rice"],
+      calories: 300,
+      protein: 6,
+      fibre: 3,
+      assumptions: "Estimate",
+      approved: mode !== "unapproved",
+    };
+    const response = await handleApi(
+      request({
+        operation: "chat",
+        message: "I ate my menu breakfast",
+        context: {
+          profile: { meals: 3 },
+          approvedMenu: [{ day: "Thu", meals: [meal] }],
+          foodLogs:
+            mode === "already logged"
+              ? [{ menuDay: "Thu", menuSlot: "Breakfast" }]
+              : [],
+        },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test" },
+      async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    calls === 1
+                      ? {
+                          functionCall: {
+                            name: "preview_menu_log",
+                            args: {
+                              message: "Preview",
+                              consumptionEvidence: "I ate my menu breakfast",
+                              day: "Thu",
+                              slots: ["Breakfast"],
+                            },
+                          },
+                        }
+                      : { text: "Could you clarify the meal you ate?" },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+      },
+    );
+    expect(calls).toBe(2);
+    expect(response.status).toBe(200);
+    expect((await response.json()).foods).toEqual([]);
+  },
+);

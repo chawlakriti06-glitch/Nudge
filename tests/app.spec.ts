@@ -1426,3 +1426,134 @@ test("multi-turn conversation uses optional server actions, corrects a preview, 
   expect(foods).toHaveLength(1);
   expect(foods[0].calories).toBe(180);
 });
+
+test("chat logs approved draft menu meals with their original nutrition only after confirmation", async ({
+  page,
+}) => {
+  await seed(page);
+  const weekday = await page.evaluate(
+    () =>
+      ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date().getDay()],
+  );
+  const meal = {
+    slot: "Breakfast",
+    name: "Poha",
+    portion: "1 katori (150 g)",
+    ingredients: ["rice flakes", "oil"],
+    calories: 310,
+    protein: 7,
+    fibre: 4,
+    assumptions: "Includes 5 ml oil",
+    approved: true,
+  };
+  await page.evaluate(
+    ({ weekday, meal }) => {
+      const state = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+      state.draft = [
+        {
+          day: weekday,
+          meals: [
+            meal,
+            {
+              ...meal,
+              slot: "Lunch",
+              name: "Rajma rice",
+              calories: 450,
+              protein: 15,
+              fibre: 9,
+            },
+            { ...meal, slot: "Dinner", name: "Dal", approved: false },
+          ],
+        },
+      ];
+      localStorage.setItem("nudge.local.v1", JSON.stringify(state));
+    },
+    { weekday, meal },
+  );
+  await page.reload();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  await page.route("**/api/chat", async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.context.plan).toEqual([]);
+    expect(body.context.approvedMenu[0].meals.map((m: any) => m.name)).toEqual([
+      "Poha",
+      "Rajma rice",
+    ]);
+    const response = await handleApi(
+      new Request("https://nudge.example/api/chat", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      { NUDGE_GEMINI_API_KEY: "test" },
+      async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      functionCall: {
+                        name: "preview_menu_log",
+                        args: {
+                          message:
+                            "Your planned breakfast and lunch are ready to confirm.",
+                          consumptionEvidence: body.message,
+                          day: weekday,
+                          slots: ["Breakfast", "Lunch"],
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ),
+    );
+    await route.fulfill({
+      status: response.status,
+      json: await response.json(),
+    });
+  });
+  await page
+    .getByPlaceholder("Food, cravings, or just a chat…")
+    .fill("I ate my approved menu breakfast and lunch");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.getByText("Poha", { exact: true })).toBeVisible();
+  await expect(page.getByText("Rajma rice", { exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods,
+    ),
+  ).toEqual([]);
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods.length,
+      ),
+    )
+    .toBe(2);
+  const stored = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(
+    stored.foods.map((f: any) => [f.name, f.calories, f.menuSlot]),
+  ).toEqual([
+    ["Poha", 310, "Breakfast"],
+    ["Rajma rice", 450, "Lunch"],
+  ]);
+  expect(stored.plan).toEqual([]);
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "aria-valuetext",
+    "760 of 1800 kcal",
+  );
+});

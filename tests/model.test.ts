@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  approvedMenu,
   dateKey,
   totals,
   estimate,
@@ -202,4 +203,30 @@ it("sums known nutrient values by date and flags missing historical nutrition", 
     protein: { value: 12, unknown: 1 },
     fibre: { value: 8, unknown: 1 },
   });
+});
+
+it("approved draft meals are available alongside saved meals without leaking unapproved replacements", () => {
+  const meal = {
+    slot: "Breakfast",
+    name: "Poha",
+    portion: "1 bowl",
+    ingredients: ["rice"],
+    calories: 300,
+    assumptions: "Estimate",
+    approved: true,
+  };
+  const result = approvedMenu(
+    [{ day: "Thu", meals: [meal, { ...meal, slot: "Dinner", name: "Dal" }] }],
+    [
+      {
+        day: "Thu",
+        meals: [
+          { ...meal, name: "Idli" },
+          { ...meal, slot: "Dinner", name: "Rice", approved: false },
+          { ...meal, slot: "Lunch", name: "Rajma" },
+        ],
+      },
+    ],
+  );
+  expect(result[0].meals.map((m) => m.name)).toEqual(["Idli", "Dal", "Rajma"]);
 });

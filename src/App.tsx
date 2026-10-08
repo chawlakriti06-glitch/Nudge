@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   conflict,
+  approvedMenu,
   dateKey,
   days,
   emptyState,
@@ -797,6 +798,8 @@ export default function App() {
             eaten: t.eaten,
             remaining: t.remaining,
             paused,
+            approvedMenu: approvedMenu(state.plan, state.draft),
+            menuDraft: state.draft,
             plan:
               source === "chat"
                 ? state.plan

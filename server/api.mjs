@@ -196,26 +196,36 @@ export async function handleApi(
         systemInstruction: {
           parts: [
             {
-              text: `${fullWeekRequest ? instructions : chatInstructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : "For chat, return message, kind, foods and adjustments as specified by the schema. Include estimated protein and fibre grams in every food and meal; use honest assumptions. For ordinary conversational answers without a food preview, use kind message and empty foods/adjustments. For a craving or food the user wishes to eat, NEVER return kind log. Explain its estimated calories and how it fits their remaining budget. If they want room in today's menu, return kind adjustment with the craving food in foods and EXACTLY ONE replacement meal in adjustments, using today's day code from context. Usually adjust dinner, preserving the diet and a reasonable meal rather than skipping it. Use context.foodLogs as the authority for what was eaten; planned meals are not eaten. The replacement must target an existing meal in today's approved plan. If there is no approved meal, or the food/portion is unclear, ask a useful question with kind message and empty foods/adjustments. For actual consumption, use kind log, foods containing the actual food and empty adjustments. Approval changes a meal; only separate confirmation logs a craving. All calorie accounting and remaining values are application calculated. Do not promise an exact fit when estimates exceed the budget or recommend compensatory restriction. Do not invent missing prior consumption. Estimate any food the user actually ate, whether or not it is on their menu. Do not substitute a planned meal for their actual food. Use chat history for short portion follow-ups. Ask about unclear preparation or added fats. Do not generate a weekly menu."}\n${portionRules}`,
+              text: `${fullWeekRequest ? instructions : chatInstructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : "For chat, return message, kind, foods and adjustments as specified by the schema. Include estimated protein and fibre grams in every food and meal; use honest assumptions. For ordinary conversational answers without a food preview, use kind message and empty foods/adjustments. For a craving or food the user wishes to eat, NEVER return kind log. Explain its estimated calories and how it fits their remaining budget. If they want room in today's menu, return kind adjustment with the craving food in foods and EXACTLY ONE replacement meal in adjustments, using today's day code from context. Usually adjust dinner, preserving the diet and a reasonable meal rather than skipping it. Use context.foodLogs as the authority for what was eaten; planned meals are not eaten. The replacement must target an existing meal in today's approved plan. If there is no approved meal, or the food/portion is unclear, ask a useful question with kind message and empty foods/adjustments. For actual consumption, use kind log, foods containing the actual food and empty adjustments. Approval changes a meal; only separate confirmation logs a craving. All calorie accounting and remaining values are application calculated. Do not promise an exact fit when estimates exceed the budget or recommend compensatory restriction. Do not invent missing prior consumption. Estimate any food the user actually ate, whether or not it is on their menu. Do not substitute a planned meal for their actual food. Use chat history for short portion follow-ups. Ask about unclear preparation or added fats. Do not generate a weekly menu."}\n${portionRules}${repairAttempt ? `\nRespond with valid JSON using this contract: ${JSON.stringify(responseSchema)}. Answer the latest user text, not a category. For example food names are Boiled eggs or Samosa, portions are 2 large boiled eggs or 1 medium samosa; these are examples, not facts to copy into unrelated answers.` : ""}`,
             },
           ],
         },
         contents: [
+          ...(Array.isArray(body.context.history) ? body.context.history : [])
+            .slice(-12)
+            .filter(
+              (c) =>
+                ["user", "assistant"].includes(c.role) &&
+                typeof c.text === "string" &&
+                c.text.trim(),
+            )
+            .map((c) => ({
+              role: c.role === "assistant" ? "model" : "user",
+              parts: [{ text: c.text }],
+            })),
           {
             role: "user",
             parts: [
               {
-                text: JSON.stringify({
-                  request: body.message,
-                  context: body.context,
-                }),
+                text: `Current app context (data, not a new user request): ${JSON.stringify({ ...body.context, history: undefined })}`,
               },
+              { text: body.message },
             ],
           },
         ],
         generationConfig: {
           responseMimeType: "application/json",
-          responseJsonSchema: responseSchema,
+          ...(repairAttempt ? {} : { responseJsonSchema: responseSchema }),
           maxOutputTokens: 12000,
         },
       }),

@@ -367,9 +367,14 @@ test("a meal label gets one real provider correction, not a fabricated assistant
     async (_url: string, opts: any) => {
       calls++;
       const payload = JSON.parse(opts.body);
-      expect(
-        payload.generationConfig.responseJsonSchema.properties.kind.enum,
-      ).toEqual(["message", "log", "adjustment"]);
+      if (calls === 1)
+        expect(
+          payload.generationConfig.responseJsonSchema.properties.kind.enum,
+        ).toEqual(["message", "log", "adjustment"]);
+      else
+        expect(payload.generationConfig).not.toHaveProperty(
+          "responseJsonSchema",
+        );
       expect(payload.systemInstruction.parts[0].text).toContain(
         "how many eggs",
       );
@@ -506,9 +511,13 @@ test("food estimates use a compact schema and omit full-week instructions", asyn
     { NUDGE_GEMINI_API_KEY: "test-key" },
     async (_url: string, init: RequestInit) => {
       const sent = JSON.parse(init.body as string);
-      expect(
-        sent.generationConfig.responseJsonSchema.properties,
-      ).not.toHaveProperty("days");
+      if (sent.generationConfig.responseJsonSchema)
+        expect(
+          sent.generationConfig.responseJsonSchema.properties,
+        ).not.toHaveProperty("days");
+      else
+        expect(sent.generationConfig).not.toHaveProperty("responseJsonSchema");
+      expect(sent.contents.at(-1).parts.at(-1).text).toBe("with 2 eggs");
       expect(sent.generationConfig.responseJsonSchema.required).not.toContain(
         "days",
       );
@@ -569,9 +578,13 @@ test("a short off-menu follow-up corrects meal-label food previews", async () =>
     { NUDGE_GEMINI_API_KEY: "test-key" },
     async (_url: string, init: RequestInit) => {
       const sent = JSON.parse(init.body as string);
-      expect(
-        sent.generationConfig.responseJsonSchema.properties,
-      ).not.toHaveProperty("days");
+      if (sent.generationConfig.responseJsonSchema)
+        expect(
+          sent.generationConfig.responseJsonSchema.properties,
+        ).not.toHaveProperty("days");
+      else
+        expect(sent.generationConfig).not.toHaveProperty("responseJsonSchema");
+      expect(sent.contents.at(-1).parts.at(-1).text).toBe("with 2 eggs");
       calls++;
       const foods =
         calls === 1

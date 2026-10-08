@@ -4,6 +4,8 @@ import { dietFor } from "./diet.js";
 import { readApiJson } from "./api";
 import { useEffect, useRef, useState } from "react";
 import {
+  Home,
+  Utensils,
   ArrowUp,
   Mic,
   MessageCircle,
@@ -133,12 +135,15 @@ function ProfileForm({
   profile,
   onSave,
   onBack,
+  setup = false,
 }: {
+  setup?: boolean;
   profile: Profile;
   onSave: (p: Profile) => void;
   onBack: () => void;
 }) {
   const [p, setP] = useState(profile);
+  const [step, setStep] = useState(1);
   const [mode, setMode] = useState<"manual" | "estimate">("manual");
   const [age, setAge] = useState("");
   const [sex, setSex] = useState("");
@@ -160,13 +165,23 @@ function ProfileForm({
   };
   return (
     <div className="form-screen">
-      <button className="back" onClick={onBack}>
+      <button
+        className="back"
+        onClick={() => (setup && step === 2 ? setStep(1) : onBack())}
+      >
         <ArrowLeft size={18} /> Back
       </button>
+      {setup && <p className="step-label">Step {step} of 2</p>}
       <h1>
-        {profile.budget ? "Your details, your rules." : "Let’s get to know you"}
+        {setup
+          ? step === 1
+            ? "A few basics."
+            : "Food, your way."
+          : "Your profile"}
       </h1>
-      <p className="subtitle">A few basics. Then we’ll figure out the menu.</p>
+      <p className="subtitle">
+        {setup ? "A plan built around you." : "Your goals. Your rules."}
+      </p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -187,320 +202,349 @@ function ProfileForm({
           onSave(p);
         }}
       >
-        <label>
-          Name{" "}
-          <input
-            value={p.name}
-            onChange={(e) => set("name", e.target.value)}
-            placeholder="What should we call you?"
-            maxLength={60}
-          />
-        </label>
-        <div className="two">
+        <fieldset hidden={setup && step !== 1}>
           <label>
-            Height (cm)
+            Name{" "}
             <input
-              required
-              type="number"
-              min="100"
-              max="250"
-              value={p.height}
-              onChange={(e) =>
-                set(
-                  "height",
-                  e.target.value === "" ? "" : Number(e.target.value),
-                )
-              }
+              value={p.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="What should we call you?"
+              maxLength={60}
             />
           </label>
-          <label>
-            Weight (kg)
-            <input
-              required
-              type="number"
-              step="0.1"
-              min="25"
-              max="350"
-              value={p.weight}
-              onChange={(e) =>
-                set(
-                  "weight",
-                  e.target.value === "" ? "" : Number(e.target.value),
-                )
-              }
-            />
-          </label>
-        </div>
-        <label>
-          Activity level
-          <select
-            value={p.activity}
-            onChange={(e) => set("activity", e.target.value)}
-          >
-            <option>Low</option>
-            <option>Medium</option>
-            <option>High</option>
-          </select>
-        </label>
-        <div className="two">
-          <label>
-            Your goal
-            <select
-              value={p.goal}
-              onChange={(e) => set("goal", e.target.value)}
-            >
-              <option value="Lose">Lose weight</option>
-              <option value="Maintain">Maintain weight</option>
-              <option value="Gain">Gain weight</option>
-            </select>
-          </label>
-          <label>
-            Meals per day
-            <select
-              value={p.meals}
-              onChange={(e) => set("meals", Number(e.target.value))}
-            >
-              <option value={3}>3 meals</option>
-              <option value={4}>4 meals, with snacks</option>
-            </select>
-          </label>
-        </div>
-        <label>
-          Dietary preference
-          <select
-            aria-label="Dietary preference"
-            value={dietFor(p)}
-            onChange={(e) => set("diet", e.target.value)}
-            required
-          >
-            <option value="">Choose your diet</option>
-            <option value="vegetarian">
-              Vegetarian (no meat, fish or eggs)
-            </option>
-            <option value="eggetarian">
-              Eggetarian (eggs, no meat or fish)
-            </option>
-            <option value="vegan">Vegan (no animal ingredients)</option>
-            <option value="non-vegetarian">Non-vegetarian</option>
-          </select>
-        </label>
-        <label>
-          Food preferences
-          <input
-            value={p.preferences}
-            onChange={(e) => set("preferences", e.target.value)}
-            placeholder="North Indian, South Indian, quick lunches…"
-          />
-        </label>
-        <label>
-          Dislikes
-          <input
-            value={p.dislikes}
-            onChange={(e) => set("dislikes", e.target.value)}
-            placeholder="Comma-separated foods"
-          />
-        </label>
-        <label>
-          Allergies
-          <input
-            required
-            value={p.allergies}
-            onChange={(e) => set("allergies", e.target.value)}
-            placeholder="e.g. peanuts, milk"
-          />
-        </label>
-        <button
-          type="button"
-          className="text-button"
-          onClick={() => set("allergies", "None")}
-        >
-          No known allergies — None
-        </button>
-        <small>
-          Ingredients are checked against your exclusions. Cross-contact cannot
-          be guaranteed.
-        </small>
-        <h2>Your daily budget</h2>
-        <div className="segmented">
-          <button
-            type="button"
-            className={mode === "manual" ? "active" : ""}
-            onClick={() => setMode("manual")}
-          >
-            Enter my own
-          </button>
-          <button
-            type="button"
-            className={mode === "estimate" ? "active" : ""}
-            onClick={() => setMode("estimate")}
-          >
-            Help me estimate
-          </button>
-        </div>
-        {mode === "estimate" && (
-          <div className="estimate">
-            <p>
-              This adult calorie estimate uses your weight, height, age and sex.
-              The original study uses different adjustments for females and
-              males. You can enter your own budget instead. Activity levels are
-              rough estimates, not measurements.
-            </p>
-            <div className="two">
-              <label>
-                Age
-                <input
-                  type="number"
-                  min="18"
-                  max="100"
-                  value={age}
-                  onChange={(e) => setAge(e.target.value)}
-                />
-              </label>
-              <label>
-                Sex for calorie estimate
-                <select value={sex} onChange={(e) => setSex(e.target.value)}>
-                  <option value="">Choose</option>
-                  <option value="female">Female</option>
-                  <option value="male">Male</option>
-                </select>
-              </label>
-            </div>
-            <label className="check">
+          <div className="two">
+            <label>
+              Height (cm)
               <input
-                type="checkbox"
-                checked={special}
-                onChange={(e) => setSpecial(e.target.checked)}
+                required
+                type="number"
+                min="100"
+                max="250"
+                value={p.height}
+                onChange={(e) =>
+                  set(
+                    "height",
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
+                }
               />
-              Pregnancy or circumstances needing a personalised estimate
             </label>
-            <small>
-              For under-18s or special circumstances, use a budget chosen with
-              appropriate professional guidance. You can enter your own without
-              sharing age or sex.
-            </small>
-            <button type="button" className="secondary" onClick={propose}>
-              Calculate estimate
-            </button>
-            {maintenance > 0 && (
-              <div className="estimate-result">
-                <strong>
-                  Estimated maintenance: {maintenance.toLocaleString()} kcal/day
-                </strong>
-                <small>
-                  RMR = 10 × kg + 6.25 × cm − 5 × age{" "}
-                  {sex === "male" ? "+ 5" : "− 161"}. Activity multiplier:{" "}
-                  {p.activity === "Low"
-                    ? "1.2"
-                    : p.activity === "Medium"
-                      ? "1.55"
-                      : "1.725"}
-                  . This estimates maintenance, not your goal target.
-                </small>
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => set("budget", maintenance)}
-                >
-                  Use maintenance budget
-                </button>
-                {p.goal !== "Maintain" && (
-                  <>
-                    <small>
-                      Optional{" "}
-                      {p.goal === "Lose"
-                        ? "250 kcal reduction"
-                        : "250 kcal increase"}{" "}
-                      for your selected goal. This is a starting preference, not
-                      a clinical recommendation; only applied if you accept.
-                    </small>
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() =>
-                        set(
-                          "budget",
-                          maintenance + (p.goal === "Lose" ? -250 : 250),
-                        )
-                      }
-                    >
-                      Accept proposed{" "}
-                      {maintenance + (p.goal === "Lose" ? -250 : 250)} kcal
-                      budget
-                    </button>
-                  </>
-                )}
-                <a
-                  href="https://pubmed.ncbi.nlm.nih.gov/2305711/"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Original study (1990)
-                </a>
-              </div>
-            )}
+            <label>
+              Weight (kg)
+              <input
+                required
+                type="number"
+                step="0.1"
+                min="25"
+                max="350"
+                value={p.weight}
+                onChange={(e) =>
+                  set(
+                    "weight",
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
+                }
+              />
+            </label>
           </div>
-        )}
-        <div className="two-col">
           <label>
-            Daily protein target (g)
-            <input
-              type="number"
-              min="1"
-              max="500"
-              value={p.proteinTarget ?? 60}
-              onChange={(e) =>
-                set(
-                  "proteinTarget",
-                  e.target.value === "" ? "" : Number(e.target.value),
-                )
-              }
+            Activity level
+            <select
+              value={p.activity}
+              onChange={(e) => set("activity", e.target.value)}
+            >
+              <option>Low</option>
+              <option>Medium</option>
+              <option>High</option>
+            </select>
+          </label>
+          <div className="two">
+            <label>
+              Your goal
+              <select
+                value={p.goal}
+                onChange={(e) => set("goal", e.target.value)}
+              >
+                <option value="Lose">Lose weight</option>
+                <option value="Maintain">Maintain weight</option>
+                <option value="Gain">Gain weight</option>
+              </select>
+            </label>
+            <label>
+              Meals per day
+              <select
+                value={p.meals}
+                onChange={(e) => set("meals", Number(e.target.value))}
+              >
+                <option value={3}>3 meals</option>
+                <option value={4}>4 meals, with snacks</option>
+              </select>
+            </label>
+          </div>
+        </fieldset>
+        <fieldset hidden={setup && step !== 2}>
+          <label>
+            Dietary preference
+            <select
+              aria-label="Dietary preference"
+              value={dietFor(p)}
+              onChange={(e) => set("diet", e.target.value)}
               required
+            >
+              <option value="">Choose your diet</option>
+              <option value="vegetarian">
+                Vegetarian (no meat, fish or eggs)
+              </option>
+              <option value="eggetarian">
+                Eggetarian (eggs, no meat or fish)
+              </option>
+              <option value="vegan">Vegan (no animal ingredients)</option>
+              <option value="non-vegetarian">Non-vegetarian</option>
+            </select>
+          </label>
+          <label>
+            Food preferences
+            <input
+              value={p.preferences}
+              onChange={(e) => set("preferences", e.target.value)}
+              placeholder="North Indian, South Indian, quick lunches…"
             />
           </label>
           <label>
-            Daily fibre target (g)
+            Dislikes
             <input
-              type="number"
-              min="1"
-              max="100"
-              value={p.fibreTarget ?? 25}
-              onChange={(e) =>
-                set(
-                  "fibreTarget",
-                  e.target.value === "" ? "" : Number(e.target.value),
-                )
-              }
-              required
+              value={p.dislikes}
+              onChange={(e) => set("dislikes", e.target.value)}
+              placeholder="Comma-separated foods"
             />
           </label>
-        </div>
-        <small>
-          Editable starting targets: 60 g protein and 25 g fibre. Choose targets
-          that suit you.
-        </small>
-        <label>
-          Daily calorie budget (kcal)
-          <input
-            required
-            type="number"
-            min="800"
-            max="6000"
-            value={p.budget || ""}
-            onChange={(e) => set("budget", Number(e.target.value))}
-            placeholder="Enter a budget you choose"
-          />
-        </label>
-        <small>
-          Editable anytime. Only confirmed food counts toward intake.
-        </small>
+          <label>
+            Allergies
+            <input
+              required
+              value={p.allergies}
+              onChange={(e) => set("allergies", e.target.value)}
+              placeholder="e.g. peanuts, milk"
+            />
+          </label>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => set("allergies", "None")}
+          >
+            No known allergies — None
+          </button>
+          <small>
+            Ingredients are checked against your exclusions. Cross-contact
+            cannot be guaranteed.
+          </small>
+          <h2>Your daily budget</h2>
+          <div className="segmented">
+            <button
+              type="button"
+              className={mode === "manual" ? "active" : ""}
+              onClick={() => setMode("manual")}
+            >
+              Enter my own
+            </button>
+            <button
+              type="button"
+              className={mode === "estimate" ? "active" : ""}
+              onClick={() => setMode("estimate")}
+            >
+              Help me estimate
+            </button>
+          </div>
+          {mode === "estimate" && (
+            <div className="estimate">
+              <p>
+                This adult calorie estimate uses your weight, height, age and
+                sex. The original study uses different adjustments for females
+                and males. You can enter your own budget instead. Activity
+                levels are rough estimates, not measurements.
+              </p>
+              <div className="two">
+                <label>
+                  Age
+                  <input
+                    type="number"
+                    min="18"
+                    max="100"
+                    value={age}
+                    onChange={(e) => setAge(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Sex for calorie estimate
+                  <select value={sex} onChange={(e) => setSex(e.target.value)}>
+                    <option value="">Choose</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                  </select>
+                </label>
+              </div>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={special}
+                  onChange={(e) => setSpecial(e.target.checked)}
+                />
+                Pregnancy or circumstances needing a personalised estimate
+              </label>
+              <small>
+                For under-18s or special circumstances, use a budget chosen with
+                appropriate professional guidance. You can enter your own
+                without sharing age or sex.
+              </small>
+              <button type="button" className="secondary" onClick={propose}>
+                Calculate estimate
+              </button>
+              {maintenance > 0 && (
+                <div className="estimate-result">
+                  <strong>
+                    Estimated maintenance: {maintenance.toLocaleString()}{" "}
+                    kcal/day
+                  </strong>
+                  <small>
+                    RMR = 10 × kg + 6.25 × cm − 5 × age{" "}
+                    {sex === "male" ? "+ 5" : "− 161"}. Activity multiplier:{" "}
+                    {p.activity === "Low"
+                      ? "1.2"
+                      : p.activity === "Medium"
+                        ? "1.55"
+                        : "1.725"}
+                    . This estimates maintenance, not your goal target.
+                  </small>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => set("budget", maintenance)}
+                  >
+                    Use maintenance budget
+                  </button>
+                  {p.goal !== "Maintain" && (
+                    <>
+                      <small>
+                        Optional{" "}
+                        {p.goal === "Lose"
+                          ? "250 kcal reduction"
+                          : "250 kcal increase"}{" "}
+                        for your selected goal. This is a starting preference,
+                        not a clinical recommendation; only applied if you
+                        accept.
+                      </small>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          set(
+                            "budget",
+                            maintenance + (p.goal === "Lose" ? -250 : 250),
+                          )
+                        }
+                      >
+                        Accept proposed{" "}
+                        {maintenance + (p.goal === "Lose" ? -250 : 250)} kcal
+                        budget
+                      </button>
+                    </>
+                  )}
+                  <a
+                    href="https://pubmed.ncbi.nlm.nih.gov/2305711/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Original study (1990)
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="two-col">
+            <label>
+              Daily protein target (g)
+              <input
+                type="number"
+                min="1"
+                max="500"
+                value={p.proteinTarget ?? 60}
+                onChange={(e) =>
+                  set(
+                    "proteinTarget",
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
+                }
+                required
+              />
+            </label>
+            <label>
+              Daily fibre target (g)
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={p.fibreTarget ?? 25}
+                onChange={(e) =>
+                  set(
+                    "fibreTarget",
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
+                }
+                required
+              />
+            </label>
+          </div>
+          <small>
+            Editable starting targets: 60 g protein and 25 g fibre. Choose
+            targets that suit you.
+          </small>
+          <label>
+            Daily calorie budget (kcal)
+            <input
+              required
+              type="number"
+              min="800"
+              max="6000"
+              value={p.budget || ""}
+              onChange={(e) => set("budget", Number(e.target.value))}
+              placeholder="Enter a budget you choose"
+            />
+          </label>
+          <small>
+            Editable anytime. Only confirmed food counts toward intake.
+          </small>
+        </fieldset>
         {error && (
           <p role="alert" className="error">
             {error}
           </p>
         )}
-        <button className="primary" type="submit">
-          {profile.budget ? "Save changes" : "Continue"} <ArrowUp size={17} />
-        </button>
+        {setup && step === 1 ? (
+          <button
+            className="primary"
+            type="button"
+            onClick={() => {
+              if (
+                p.height < 100 ||
+                p.height > 250 ||
+                p.weight < 25 ||
+                p.weight > 350
+              ) {
+                setError("Check your height and weight before continuing.");
+                return;
+              }
+              setError("");
+              setStep(2);
+              window.scrollTo(0, 0);
+            }}
+          >
+            Continue
+          </button>
+        ) : (
+          <button className="primary" type="submit">
+            {setup ? "Finish setup" : "Save changes"}
+          </button>
+        )}
       </form>
     </div>
   );
@@ -562,7 +606,7 @@ function IntakeRing({
 }
 export default function App() {
   const [state, setState] = useState<State>(read);
-  const [screen, setScreen] = useState(state.profile ? "home" : "starter");
+  const [screen, setScreen] = useState(state.profile ? "dashboard" : "starter");
   const [language, setLanguage] = useState(
     state.profile?.language || "English",
   );
@@ -1248,9 +1292,7 @@ export default function App() {
       <main className="app starter">
         <div className="starter-center">
           <Logo />
-          <h1>
-            Nudge<span className="orange-dot">.</span>
-          </h1>
+          <h1>Nudge</h1>
           <p>Your personal menu curator.</p>
           <h2>
             A little nudge.
@@ -1276,6 +1318,11 @@ export default function App() {
           </button>
           <Languages value={language} onChange={setLanguage} />
         </header>
+        <h1 className="welcome-title">
+          Let’s start
+          <br />
+          with today.
+        </h1>
         <div className="welcome-message">
           <Logo small />
           <div className="bubble assistant">
@@ -1309,6 +1356,7 @@ export default function App() {
     return (
       <main className="app">
         <ProfileForm
+          setup={!p}
           profile={p || { ...initialProfile, language }}
           onSave={saveProfile}
           onBack={() => {
@@ -1336,15 +1384,112 @@ export default function App() {
           <Bell size={21} />
         </button>
       </header>
+      {screen === "dashboard" && (
+        <section className="dashboard-screen">
+          <h1>Today</h1>
+          <p className="subtitle">
+            {new Date().toLocaleDateString(undefined, {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
+          </p>
+          <div className="daily-budget">
+            <div>
+              <strong>{Math.max(0, t.remaining).toLocaleString()}</strong>
+              <h2>kcal left today</h2>
+              {t.remaining < 0 && (
+                <p>{Math.abs(t.remaining)} kcal over budget</p>
+              )}
+            </div>
+            <div className="budget-facts">
+              <p>
+                <strong>{p?.budget.toLocaleString()} kcal</strong>
+                <span>daily budget</span>
+              </p>
+              <p>
+                <strong>{t.eaten.toLocaleString()} kcal</strong>
+                <span>eaten</span>
+              </p>
+            </div>
+          </div>
+          <section
+            className="calorie-panel dashboard-nutrients"
+            aria-label="Consumed today"
+          >
+            <IntakeRing
+              label="Daily calorie intake"
+              title="Calories"
+              value={t.eaten}
+              target={p?.budget || 0}
+              unit="kcal"
+            />
+            <IntakeRing
+              label="Daily protein intake"
+              title="Protein"
+              value={t.protein.value}
+              target={p?.proteinTarget || 60}
+              unit="g"
+              unknown={t.protein.unknown}
+            />
+            <IntakeRing
+              label="Daily fibre intake"
+              title="Fibre"
+              value={t.fibre.value}
+              target={p?.fibreTarget || 25}
+              unit="g"
+              unknown={t.fibre.unknown}
+            />
+          </section>
+          <div className="food-log-heading">
+            <h2>Today’s food log</h2>
+            <button
+              className="text-button"
+              aria-label="Open food ledger"
+              onClick={() => {
+                setLogDate(day);
+                setLedger(true);
+              }}
+            >
+              View all
+            </button>
+          </div>
+          {state.foods
+            .filter((f) => f.date === day)
+            .map((f) => (
+              <div className="dashboard-food" key={f.id}>
+                <div>
+                  <strong>{f.name}</strong>
+                  <p>{f.portion}</p>
+                </div>
+                <span>~{f.calories} kcal</span>
+                <button
+                  aria-label={`Edit ${f.name}`}
+                  onClick={() => showManual(f)}
+                >
+                  <Pencil size={18} />
+                </button>
+              </div>
+            ))}
+          {!state.foods.some((f) => f.date === day) && (
+            <p className="empty-log">
+              Your food log starts with what you eat. Nothing counts until you
+              confirm it.
+            </p>
+          )}
+          <button className="primary" onClick={() => setScreen("home")}>
+            Log food or have a chat <MessageCircle size={18} />
+          </button>
+          <button className="text-button" onClick={() => setPrivacy(true)}>
+            About estimates
+          </button>
+        </section>
+      )}
       {screen === "home" && (
         <>
           <div className="home-heading">
-            <h1>
-              {p?.name
-                ? `Hey, ${p.name.split(" ")[0]}.`
-                : "A little room for you."}
-            </h1>
-            <p className="subtitle">Let’s make your next meal easy.</p>
+            <h1>What did you eat?</h1>
+            <p className="subtitle">Food, cravings, or just a chat.</p>
           </div>
           <section className="calorie-panel">
             <IntakeRing
@@ -1745,7 +1890,7 @@ export default function App() {
               <small>
                 {ai
                   ? "Create your draft, then review it before saving."
-                  : "AI isn't connected yet. You can still log food manually in Chat."}
+                  : "AI isn't connected yet. You can still log food in Log food."}
               </small>
             </div>
           )}
@@ -1773,7 +1918,19 @@ export default function App() {
                 aria-expanded={openDay === d.day}
                 onClick={() => setOpenDay(openDay === d.day ? "" : d.day)}
               >
-                <strong>{d.day}</strong>
+                <strong>
+                  {(
+                    {
+                      Mon: "Monday",
+                      Tue: "Tuesday",
+                      Wed: "Wednesday",
+                      Thu: "Thursday",
+                      Fri: "Friday",
+                      Sat: "Saturday",
+                      Sun: "Sunday",
+                    } as Record<string, string>
+                  )[d.day] || d.day}
+                </strong>
                 <span>
                   {d.meals.reduce((s, m) => s + m.calories, 0)} kcal planned
                 </span>
@@ -1786,6 +1943,11 @@ export default function App() {
                 <div className="day-content">
                   {d.meals.map((m, i) =>
                     mealCard(m, d.day, i, !!state.draft.length),
+                  )}
+                  {!state.draft.length && d.meals.every((m) => m.approved) && (
+                    <p className="day-approved">
+                      <Check size={18} /> Approved
+                    </p>
                   )}
                   {!!state.draft.length && (
                     <button
@@ -1996,8 +2158,9 @@ export default function App() {
       )}
       <nav className="bottom-nav" aria-label="Main navigation">
         {[
-          ["home", "Chat", MessageCircle],
-          ["menu", "Menu", NotebookText],
+          ["dashboard", "Home", Home],
+          ["home", "Log food", MessageCircle],
+          ["menu", "Menu", Utensils],
           ["profile", "Profile", UserRound],
         ].map(([key, label, Icon]: any) => (
           <button

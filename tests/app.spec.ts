@@ -31,6 +31,10 @@ const seed = async (page: Page) => {
       );
   }, profile);
   await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
 };
 async function nutritionOverride(page: Page) {
   if (
@@ -45,12 +49,13 @@ test("manual onboarding retains welcome food, confirms once, reloads, edits and 
   await page.getByRole("button", { name: "Let’s get started" }).click();
   await page.getByLabel("Message", { exact: true }).fill("I ate 2 samosas");
   await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: "No known allergies — None" }).click();
   await page
     .getByLabel("Dietary preference", { exact: true })
     .selectOption("vegetarian");
   await page.getByLabel("Daily calorie budget (kcal)").fill("1800");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
   await expect(
     page.getByText("I ate 2 samosas", { exact: true }),
   ).toBeVisible();
@@ -63,6 +68,10 @@ test("manual onboarding retains welcome food, confirms once, reloads, edits and 
     page.getByText("1,300 kcal remaining", { exact: true }),
   ).toBeVisible();
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(
     page.getByText("1,300 kcal remaining", { exact: true }),
   ).toBeVisible();
@@ -87,6 +96,7 @@ test("adult estimate path shows assumptions and needs acceptance", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Let’s get started" }).click();
   await page.getByRole("button", { name: "Set up my menu first" }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: "Help me estimate" }).click();
   await page.getByLabel("Age", { exact: true }).fill("30");
   await page.getByLabel("Sex for calorie estimate").selectOption("female");
@@ -115,6 +125,10 @@ test("AI unavailable preserves data and intentions do not log", async ({
   ).toBeVisible();
   await expect(page.locator(".bubble.user")).toContainText("I want 2 samosas");
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(page.locator(".bubble.user")).toContainText("I want 2 samosas");
 });
 test("pause allows logging, resume and delete clear only Nudge", async ({
@@ -126,11 +140,17 @@ test("pause allows logging, resume and delete clear only Nudge", async ({
   );
   await page.getByRole("button", { name: "Profile", exact: true }).click();
   await page.getByRole("switch", { name: "Pause suggestions today" }).click();
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(
     page.getByText("Suggestions paused today.", { exact: false }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("Toast");
   await page.getByLabel("Portion", { exact: true }).fill("1 bread slice");
   await nutritionOverride(page);
@@ -196,7 +216,10 @@ test("explicit AI fixture exercises menu approvals and allergy rejection, not a 
     .toBe(true);
   await expect(page.locator(".meal")).toHaveCount(3);
   await page.getByRole("button", { name: "Approve & save full week" }).click();
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
   await page.getByRole("button", { name: "Profile", exact: true }).click();
   await page.getByRole("button", { name: "Edit profile" }).click();
@@ -248,7 +271,7 @@ test("phone screens have no horizontal clipping or food photos", async ({
   page,
 }) => {
   await seed(page);
-  for (const tab of ["Chat", "Menu", "Profile"]) {
+  for (const tab of ["Home", "Log food", "Menu", "Profile"]) {
     await page.getByRole("button", { name: tab, exact: true }).click();
     expect(
       await page.evaluate(
@@ -286,6 +309,10 @@ test("confirmed AI preview is durable and applies once", async ({ page }) => {
   await expect(page.getByText("Count this as eaten?")).toBeVisible();
   await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(page.getByText("Count this as eaten?")).toBeVisible();
   await page
     .getByRole("button", { name: "Confirm & log", exact: true })
@@ -295,13 +322,20 @@ test("confirmed AI preview is durable and applies once", async ({ page }) => {
     page.getByRole("button", { name: "Confirm & log", exact: true }),
   ).toHaveCount(0);
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(page.getByText("1,300 kcal remaining")).toBeVisible();
 });
 test("different days, nutrient totals and undo recalculate independently", async ({
   page,
 }) => {
   await seed(page);
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("Rice");
   await page.getByLabel("Portion", { exact: true }).fill("100 g cooked");
   await nutritionOverride(page);
@@ -359,6 +393,7 @@ test("measurements can be cleared and retyped without forced zero", async ({
     await input.fill(value);
     await expect(input).toHaveValue(value);
   }
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: "Help me estimate" }).click();
   await expect(
     page.getByRole("combobox", { name: "Sex for calorie estimate" }),
@@ -392,7 +427,10 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   const arc = ring.locator(".calorie-progress");
   await expect(ring).toHaveAttribute("aria-valuenow", "0");
   await expect(arc).toHaveAttribute("stroke-dashoffset", "100");
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("Lunch");
   await page.getByLabel("Portion", { exact: true }).fill("1 plate");
   await nutritionOverride(page);
@@ -421,6 +459,10 @@ test("calorie arc follows confirmed food, edits, delete and undo", async ({
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(ring).toHaveAttribute("aria-valuenow", "25");
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(ring).toHaveAttribute("aria-valuenow", "25");
 });
 test("menu operations do not clutter chat and prior internal prompts are removed", async ({
@@ -441,6 +483,10 @@ test("menu operations do not clutter chat and prior internal prompts are removed
     localStorage.setItem("nudge.local.v1", JSON.stringify(s));
   });
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(page.locator(".bubble.user")).toHaveCount(1);
   await page.route("**/api/chat", async (r) => {
     expect(r.request().postDataJSON().operation).toBe("menu");
@@ -449,7 +495,10 @@ test("menu operations do not clutter chat and prior internal prompts are removed
   await page.getByRole("button", { name: "Menu", exact: true }).click();
   await page.getByRole("button", { name: "Create my weekly draft" }).click();
   await expect(page.getByRole("alert")).toContainText("Fixture error");
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(page.locator(".bubble.user")).toHaveCount(1);
   await expect(page.locator(".bubble.user")).toContainText("I want soup");
 });
@@ -464,6 +513,10 @@ test("first-entry AI request asks portions without displaying internal instructi
     localStorage.setItem("nudge.local.v1", JSON.stringify(s));
   });
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.route("**/api/chat", async (r) => {
     expect(r.request().postDataJSON().message).toBe("I ate eggs and bread");
     await r.fulfill({
@@ -505,6 +558,10 @@ test("Swap previews an alternative beside the meal and preserves other meals and
     localStorage.setItem("nudge.local.v1", JSON.stringify(s));
   });
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByRole("button", { name: "Menu", exact: true }).click();
   await page.route("**/api/chat", async (r) => {
     const plan = r.request().postDataJSON().context.plan;
@@ -588,6 +645,10 @@ test("craving approval changes only today's dinner and confirmation updates thre
     localStorage.setItem("nudge.local.v1", JSON.stringify(s));
   });
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.route("**/api/chat", async (route) => {
     const body = route.request().postDataJSON();
     expect(body.context.foodLogs).toHaveLength(1);
@@ -673,6 +734,10 @@ test("craving approval changes only today's dinner and confirmation updates thre
     page.getByRole("progressbar", { name: "Daily fibre intake" }),
   ).toHaveAttribute("aria-valuetext", "13 of 25 g");
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await expect(
     page.getByRole("progressbar", { name: "Daily protein intake" }),
   ).toHaveAttribute("aria-valuetext", "35 of 60 g");
@@ -686,7 +751,10 @@ test("manual nutrient edits and deletion recalculate without treating unknown va
   page,
 }) => {
   await seed(page);
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("Chana salad");
   await page.getByLabel("Portion", { exact: true }).fill("1 katori");
   await nutritionOverride(page);
@@ -743,6 +811,10 @@ test("a dinner adjustment cannot overwrite intake changed since the suggestion",
     localStorage.setItem("nudge.local.v1", JSON.stringify(s));
   });
   await page.reload();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.route("**/api/chat", async (route) => {
     const body = route.request().postDataJSON();
     await route.fulfill({
@@ -783,7 +855,10 @@ test("a dinner adjustment cannot overwrite intake changed since the suggestion",
     .fill("Craving a samosa, adjust dinner");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("Make room for your craving?")).toBeVisible();
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("Banana");
   await page.getByLabel("Portion", { exact: true }).fill("1 medium");
   await nutritionOverride(page);
@@ -814,7 +889,10 @@ test("food logging estimates two eggs without asking for calories or using Gemin
     calls++;
     return r.fulfill({ status: 503, json: { error: "Unavailable" } });
   });
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("2 eggs");
   await expect(
     page.getByLabel("Estimated calories", { exact: true }),
@@ -864,7 +942,10 @@ test("an unfamiliar food description opens AI review without typed nutrition", a
       },
     });
   });
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("1 katori chana chaat");
   await page.getByRole("button", { name: "Estimate & review" }).click();
   await expect(page.getByText("Count this as eaten?")).toBeVisible();
@@ -898,7 +979,14 @@ test("confirmed extra food offers lunch and dinner review without double-countin
     localStorage.setItem("nudge.local.v1", JSON.stringify(s));
   });
   await page.reload();
-  await page.getByRole("button", { name: "Log food" }).click();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  await page
+    .locator(".quick-actions")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
   await page.getByLabel("Food", { exact: true }).fill("1 medium samosa");
   await page.getByLabel("Portion", { exact: true }).fill("80 g");
   await nutritionOverride(page);

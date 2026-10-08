@@ -448,6 +448,12 @@ export default function App() {
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [swapping, setSwapping] = useState("");
+  const [swapPreview, setSwapPreview] = useState<{
+    day: string;
+    index: number;
+    meal: Meal;
+  } | null>(null);
   const [ai, setAi] = useState(false);
   const [manual, setManual] = useState(false);
   const [ledger, setLedger] = useState(false);
@@ -546,7 +552,11 @@ export default function App() {
   const paused = state.paused === day;
   const update = (patch: Partial<State>) =>
     setState((s) => ({ ...s, ...patch }));
-  const ask = async (message: string, source: "chat" | "menu" = "chat") => {
+  const ask = async (
+    message: string,
+    source: "chat" | "menu" = "chat",
+    target?: { day: string; index: number },
+  ) => {
     if (lock.current || !p || !message.trim()) return;
     if (/^i (?:don['’]t|do not) care today[.!]?$/i.test(message.trim())) {
       setState((s) => ({
@@ -560,6 +570,10 @@ export default function App() {
     const epoch = requestEpoch.current;
     lock.current = true;
     setBusy(true);
+    if (target) {
+      setSwapping(`${target.day}-${target.index}`);
+      setSwapPreview(null);
+    }
     setError("");
     if (source === "chat") {
       setText("");
@@ -609,7 +623,29 @@ export default function App() {
             { id: uid(), role: "assistant", text: result.message },
           ],
         }));
-      if (result.kind !== "message")
+      if (target) {
+        const current = (state.draft.length ? state.draft : state.plan).find(
+          (d) => d.day === target.day,
+        )?.meals[target.index];
+        const replacement = result.days
+          .find((d) => d.day === target.day)
+          ?.meals.find((m) => m.slot === current?.slot);
+        if (result.kind !== "plan" || !replacement || !current)
+          throw Error(
+            "No usable meal alternative was returned. Your plan is unchanged.",
+          );
+        if (
+          replacement.name === current.name &&
+          replacement.portion === current.portion
+        )
+          throw Error(
+            "Gemini returned the same meal. Try Swap again or edit it manually. Your plan is unchanged.",
+          );
+        setSwapPreview({
+          ...target,
+          meal: { ...replacement, approved: false },
+        });
+      } else if (result.kind !== "message")
         setProposal({
           kind: result.kind,
           foods: result.foods,
@@ -624,6 +660,7 @@ export default function App() {
     } finally {
       if (epoch === requestEpoch.current) {
         setBusy(false);
+        setSwapping("");
         lock.current = false;
       }
     }
@@ -704,6 +741,8 @@ export default function App() {
     const changed = !!p && p.meals !== next.meals;
     update({ profile: next, draft: changed ? [] : state.draft });
     setLanguage(next.language);
+    setSwapPreview(null);
+    setSwapping("");
     setProposal(null);
     setEditing(false);
     setScreen("home");
@@ -775,6 +814,7 @@ export default function App() {
         pending: "",
       });
     } else {
+      setSwapPreview(null);
       update({ draft: proposal.days });
       setScreen("menu");
     }
@@ -795,6 +835,44 @@ export default function App() {
       <p>{m.portion}</p>
       <small>{m.ingredients.join(" · ")}</small>
       <small>{m.assumptions}</small>
+      {swapPreview?.day === d && swapPreview.index === i && (
+        <div
+          className="card swap-preview"
+          role="region"
+          aria-label={`Proposed ${m.slot} swap`}
+        >
+          <span className="eyebrow">PROPOSED SWAP</span>
+          <h3>{swapPreview.meal.name}</h3>
+          <p>{swapPreview.meal.portion}</p>
+          <strong>{swapPreview.meal.calories} kcal estimated</strong>
+          <small>{swapPreview.meal.ingredients.join(" · ")}</small>
+          <small>{swapPreview.meal.assumptions}</small>
+          <small>
+            Your current meal stays until you choose. This changes the draft
+            only; it does not log intake.
+          </small>
+          <div className="actions">
+            <button
+              className="primary"
+              onClick={() => {
+                const source = state.draft.length ? state.draft : state.plan;
+                update({
+                  draft: source.map((day) => ({
+                    ...day,
+                    meals: day.meals.map((meal, index) =>
+                      day.day === d && index === i ? swapPreview.meal : meal,
+                    ),
+                  })),
+                });
+                setSwapPreview(null);
+              }}
+            >
+              Add swap to draft
+            </button>
+            <button onClick={() => setSwapPreview(null)}>Keep this meal</button>
+          </div>
+        </div>
+      )}
       <div className="meal-actions">
         <button
           onClick={() => setMealEdit({ day: d, index: i, meal: { ...m } })}
@@ -807,10 +885,11 @@ export default function App() {
             ask(
               `Swap ${d} ${m.slot}. Return a complete revised seven-day draft, preserving other meals and all exclusions.`,
               "menu",
+              { day: d, index: i },
             )
           }
         >
-          Swap
+          {swapping === `${d}-${i}` ? "Finding a swap…" : "Swap"}
         </button>
         {draft && (
           <button
@@ -1717,6 +1796,8 @@ export default function App() {
                     localStorage.removeItem(KEY);
                     setState(emptyState());
                     setProposal(null);
+                    setSwapPreview(null);
+                    setSwapping("");
                     setUndo(null);
                     setDeleteConfirm(false);
                     setScreen("starter");

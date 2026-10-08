@@ -442,3 +442,69 @@ test("first-entry AI request asks portions without displaying internal instructi
   );
   await expect(page.getByText("1,800 kcal remaining")).toBeVisible();
 });
+test("Swap previews an alternative beside the meal and preserves other meals and intake", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.getByRole("button", { name: "Profile", exact: true }).click();
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    s.plan = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+      day,
+      meals: ["Breakfast", "Lunch", "Dinner"].map((slot) => ({
+        slot,
+        name: `Original ${slot}`,
+        portion: "1 bowl",
+        ingredients: ["rice"],
+        calories: 400,
+        assumptions: "Fixture",
+        approved: true,
+      })),
+    }));
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
+  await page.route("**/api/chat", async (r) => {
+    const plan = r.request().postDataJSON().context.plan;
+    plan[0].meals[1] = {
+      ...plan[0].meals[1],
+      name: "Chickpea bowl",
+      ingredients: ["chickpeas"],
+      calories: 450,
+    };
+    plan[0].meals[2].name = "Unrequested dinner change";
+    await r.fulfill({
+      json: { message: "Fixture", kind: "plan", foods: [], days: plan },
+    });
+  });
+  await page
+    .locator(".meal")
+    .nth(1)
+    .getByRole("button", { name: "Swap", exact: true })
+    .click();
+  const preview = page.getByRole("region", { name: "Proposed Lunch swap" });
+  await expect(preview).toContainText("Chickpea bowl");
+  await expect(page.locator(".meal").nth(1).locator("h3").first()).toHaveText(
+    "Original Lunch",
+  );
+  await preview.getByRole("button", { name: "Keep this meal" }).click();
+  await expect(preview).toHaveCount(0);
+  await page
+    .locator(".meal")
+    .nth(1)
+    .getByRole("button", { name: "Swap", exact: true })
+    .click();
+  await preview.getByRole("button", { name: "Add swap to draft" }).click();
+  await expect(page.locator(".meal").nth(1).locator("h3").first()).toHaveText(
+    "Chickpea bowl",
+  );
+  await expect(page.locator(".meal").nth(2).locator("h3").first()).toHaveText(
+    "Original Dinner",
+  );
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(saved.plan[0].meals[1].name).toBe("Original Lunch");
+  expect(saved.foods).toHaveLength(0);
+});

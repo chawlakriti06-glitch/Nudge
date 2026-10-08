@@ -503,6 +503,20 @@ export default function App() {
   const requestEpoch = useRef(0);
   const recognition = useRef<any>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
+  const draftStart = useRef<HTMLDivElement>(null);
+  const scrollToDraft = useRef(false);
+  useEffect(() => {
+    if (screen === "menu" && state.draft.length && scrollToDraft.current) {
+      scrollToDraft.current = false;
+      draftStart.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+        block: "start",
+      });
+      draftStart.current?.focus({ preventScroll: true });
+    }
+  }, [state.draft, screen]);
   useEffect(() => {
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
@@ -665,6 +679,18 @@ export default function App() {
           ...target,
           meal: { ...replacement, approved: false },
         });
+      } else if (source === "menu" && result.kind === "plan") {
+        scrollToDraft.current = true;
+        setSwapPreview(null);
+        setProposal(null);
+        setOpenDay(result.days[0].day);
+        update({
+          draft: result.days.map((d) => ({
+            ...d,
+            meals: d.meals.map((m) => ({ ...m, approved: false })),
+          })),
+        });
+        setScreen("menu");
       } else if (result.kind !== "message")
         setProposal({
           kind: result.kind,
@@ -1353,7 +1379,7 @@ export default function App() {
               </p>
             )}
           {state.draft.length > 0 && (
-            <div className="notice">
+            <div className="notice" ref={draftStart} tabIndex={-1}>
               Draft for review. Your saved plan stays unchanged until approval.{" "}
               <button onClick={() => update({ draft: [] })}>
                 Discard draft

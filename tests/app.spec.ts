@@ -172,7 +172,19 @@ test("explicit AI fixture exercises menu approvals and allergy rejection, not a 
   );
   await page.getByRole("button", { name: "Menu", exact: true }).click();
   await page.getByRole("button", { name: "Create my weekly draft" }).click();
-  await page.getByRole("button", { name: "Review draft", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Review draft", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Draft for review.", { exact: false }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .locator(".notice[tabindex='-1']")
+        .evaluate((el) => document.activeElement === el),
+    )
+    .toBe(true);
   await expect(page.locator(".meal")).toHaveCount(3);
   await page.getByRole("button", { name: "Approve & save full week" }).click();
   await page.getByRole("button", { name: "Chat", exact: true }).click();
@@ -198,7 +210,19 @@ test("explicit AI fixture exercises menu approvals and allergy rejection, not a 
     }),
   );
   await page.getByRole("button", { name: "Create revised draft" }).click();
-  await page.getByRole("button", { name: "Review draft", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Review draft", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Draft for review.", { exact: false }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .locator(".notice[tabindex='-1']")
+        .evaluate((el) => document.activeElement === el),
+    )
+    .toBe(true);
   await expect(page.locator(".meal")).toHaveCount(4);
   await page.getByRole("button", { name: "Discard draft" }).click();
   await expect(page.locator(".meal")).toHaveCount(3);

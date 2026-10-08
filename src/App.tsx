@@ -1,3 +1,4 @@
+import { explicitlyCompletedMeals } from "./mealCompletion.js";
 import { FoodIllustration } from "./FoodIllustration";
 import { MenuBasics } from "./MenuBasics";
 import { QuickSetup } from "./QuickSetup";
@@ -807,6 +808,12 @@ export default function App() {
       setText("");
       return;
     }
+    const statedCompleted = explicitlyCompletedMeals(message, p.meals);
+    const requestCompletedSlots = [
+      ...new Set([...completedSlots, ...statedCompleted]),
+    ];
+    if (statedCompleted.length)
+      update({ completedMeals: { date: day, slots: requestCompletedSlots } });
     const epoch = requestEpoch.current;
     lock.current = true;
     setBusy(true);
@@ -840,7 +847,7 @@ export default function App() {
             },
             today: day,
             weekday: days[(new Date().getDay() + 6) % 7],
-            completedSlots,
+            completedSlots: requestCompletedSlots,
             foodLogs: state.foods.filter((f) => f.date === day),
             nutrients: { protein: t.protein, fibre: t.fibre },
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -887,7 +894,9 @@ export default function App() {
           ...s,
           completedMeals: {
             date: day,
-            slots: [...new Set([...completedSlots, ...result.completedSlots])],
+            slots: [
+              ...new Set([...requestCompletedSlots, ...result.completedSlots]),
+            ],
           },
         }));
       if (source === "chat")

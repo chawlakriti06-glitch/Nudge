@@ -2043,3 +2043,53 @@ test("finished meals remove the stale readjustment card without changing intake"
     page.getByRole("region", { name: "Review remaining meals" }),
   ).toHaveCount(0);
 });
+
+test("explicit completed meals hide readjustment even while AI is unavailable", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    const d = new Date();
+    s.mealReview = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    s.plan = [
+      {
+        day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()],
+        meals: ["Lunch", "Dinner"].map((slot) => ({
+          slot,
+          name: "Dal rice",
+          portion: "1 bowl",
+          ingredients: ["dal", "rice"],
+          calories: 300,
+          assumptions: "Home preparation",
+          approved: true,
+        })),
+      },
+    ];
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Review remaining meals" }),
+  ).toBeVisible();
+  await page.route("**/api/chat", (route) =>
+    route.fulfill({ status: 503, json: { error: "AI is temporarily busy." } }),
+  );
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("I have had all 3 meals of the day. What sweet can I have?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("AI is temporarily busy.")).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Review remaining meals" }),
+  ).toHaveCount(0);
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(saved.foods).toHaveLength(0);
+  expect(saved.completedMeals.slots).toEqual(["Breakfast", "Lunch", "Dinner"]);
+});

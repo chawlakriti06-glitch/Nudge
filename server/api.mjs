@@ -1,3 +1,4 @@
+import { explicitlyCompletedMeals } from "../src/mealCompletion.js";
 import { dietConflict, dietFor } from "../src/diet.js";
 const string = { type: "string" },
   number = { type: "number" };
@@ -189,15 +190,7 @@ export async function handleApi(
   // Explicit completion statements also survive a plain conversational reply.
   // These deliberately narrow assertions do not classify general chat intent
   // or infer nutrition. Negations, hypothetical meals and cravings do not match.
-  const completionStatement = body.message.trim();
-  const explicitCompletedSlots =
-    /^(?:i\s+(?:have\s+)?(?:already\s+)?(?:had|eaten|finished)\s+all\s+(?:(?:3|three|4|four)\s+)?(?:my\s+)?meals\b|all\s+(?:my\s+)?(?:3\s+|three\s+|4\s+|four\s+)?meals\s+(?:are\s+)?(?:done|finished)\b)/i.test(
-      completionStatement,
-    )
-      ? count === 4
-        ? ["Breakfast", "Lunch", "Snacks", "Dinner"]
-        : ["Breakfast", "Lunch", "Dinner"]
-      : [];
+  const explicitCompletedSlots = explicitlyCompletedMeals(body.message, count);
   if (explicitCompletedSlots.length)
     body.context.completedSlots = [
       ...new Set([

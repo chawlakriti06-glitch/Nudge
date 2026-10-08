@@ -923,3 +923,117 @@ test("a mislabeled craving gets a provider correction before exposing an adjustm
   expect(response.status).toBe(200);
   expect((await response.json()).foods[0].name).toBe("Samosa");
 });
+test("English and Hinglish lunch questions request a plan change rather than a food preview", async () => {
+  for (const message of [
+    "lunch mein kya khau?",
+    "what should i have for lunch now?",
+  ]) {
+    const meal = {
+      slot: "Lunch",
+      name: "Dal and roti",
+      portion: "1 katori dal, 2 rotis",
+      ingredients: ["dal", "wheat"],
+      calories: 450,
+      protein: 20,
+      fibre: 8,
+      assumptions: "1 tsp oil included",
+    };
+    const r = await handleApi(
+      request({
+        message,
+        context: {
+          today: "2026-10-08",
+          weekday: "Thu",
+          profile: { meals: 3 },
+          eaten: 490,
+          remaining: 1010,
+          plan: [{ day: "Thu", meals: [meal] }],
+        },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test-key" },
+      async (_url: string, init: RequestInit) => {
+        const payload = JSON.parse(init.body as string);
+        expect(
+          payload.generationConfig.responseJsonSchema.properties,
+        ).not.toHaveProperty("foods");
+        expect(payload.systemInstruction.parts[0].text).toContain(
+          "remaining-meal planning request",
+        );
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        kind: "adjustment",
+                        message: "Here's a lunch after your samosa",
+                        adjustments: [{ day: "Thu", meal }],
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+      },
+    );
+    expect(r.status).toBe(200);
+    expect((await r.json()).foods).toEqual([]);
+  }
+});
+test("a post-log review requires both requested slots and never proposes logging the food again", async () => {
+  for (const slots of [["Lunch", "Dinner"], ["Lunch"]]) {
+    const meals = ["Lunch", "Dinner"].map((slot) => ({
+      slot,
+      name: `${slot} dal`,
+      portion: "1 bowl",
+      ingredients: ["lentils"],
+      calories: 400,
+      protein: 15,
+      fibre: 8,
+      assumptions: "Estimate",
+    }));
+    const r = await handleApi(
+      request({
+        operation: "adjustment",
+        message: "Review remaining meals",
+        context: {
+          today: "2026-10-08",
+          weekday: "Thu",
+          adjustmentSlots: ["Lunch", "Dinner"],
+          profile: { meals: 3 },
+          plan: [{ day: "Thu", meals }],
+        },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test-key" },
+      async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        kind: "adjustment",
+                        message: "Review",
+                        foods: [{ name: "Already logged samosa" }],
+                        adjustments: meals
+                          .filter((m) => slots.includes(m.slot))
+                          .map((meal) => ({ day: "Thu", meal })),
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ),
+    );
+    expect(r.status).toBe(slots.length === 2 ? 200 : 502);
+    if (r.status === 200) expect((await r.json()).foods).toEqual([]);
+  }
+});

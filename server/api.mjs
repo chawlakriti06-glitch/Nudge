@@ -177,6 +177,25 @@ export async function handleApi(
     );
   }
 
+  const futureMealQuestion =
+    !fullWeekRequest &&
+    !/\b(craving|crave|want to eat|wish to eat)\b/i.test(body.message) &&
+    /what should.*(?:lunch|dinner)|(?:lunch|dinner).*kya.*(?:khau|khaun|khana)|(?:readjust|adjust).*(?:lunch|dinner)/i.test(
+      body.message,
+    );
+  const reviewRequest = body.operation === "adjustment" || futureMealQuestion;
+  const reviewSlots = Array.isArray(body.context.adjustmentSlots)
+    ? body.context.adjustmentSlots
+    : ["Lunch", "Dinner"].filter((slot) =>
+        new RegExp(slot, "i").test(body.message),
+      );
+  if (reviewRequest) {
+    responseSchema.properties.kind.enum = ["message", "adjustment"];
+    delete responseSchema.properties.foods;
+    responseSchema.required = responseSchema.required.filter(
+      (key) => key !== "foods",
+    );
+  }
   const socialConversation =
     !fullWeekRequest &&
     /^(?:hi|hello|hey|namaste|good morning|good evening|how are you|how'?s it going|kya haal (?:hai|hain)|kaise ho|kaisi ho|aap kaise (?:ho|hain)|thank you|thanks|shukriya)[?!.,\s]*$/i.test(
@@ -203,7 +222,7 @@ export async function handleApi(
             {
               text: socialConversation
                 ? `You are Nudge, a friendly conversational food companion. Reply naturally to the latest user message in their language and tone, including Hindi or Hinglish. Ordinary greetings are welcome. Do not ask for food portions unless the user asks about food. Do not change or log any food or menu. Return a short plain-text conversational reply, not JSON or a meal label.`
-                : `${fullWeekRequest ? instructions : chatInstructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : "For chat, return message, kind, foods and adjustments as specified by the schema. Include estimated protein and fibre grams in every food and meal; use honest assumptions. For ordinary conversational answers without a food preview, use kind message and empty foods/adjustments. For a craving or food the user wishes to eat, NEVER return kind log. Explain its estimated calories and how it fits their remaining budget. If they want room in today's menu, return kind adjustment with the craving food in foods and EXACTLY ONE replacement meal in adjustments, using today's day code from context. Usually adjust dinner, preserving the diet and a reasonable meal rather than skipping it. Use context.foodLogs as the authority for what was eaten; planned meals are not eaten. The replacement must target an existing meal in today's approved plan. If there is no approved meal, or the food/portion is unclear, ask a useful question with kind message and empty foods/adjustments. For actual consumption, use kind log, foods containing the actual food and empty adjustments. Approval changes a meal; only separate confirmation logs a craving. All calorie accounting and remaining values are application calculated. Do not promise an exact fit when estimates exceed the budget or recommend compensatory restriction. Do not invent missing prior consumption. Estimate any food the user actually ate, whether or not it is on their menu. Do not substitute a planned meal for their actual food. Use chat history for short portion follow-ups. Ask about unclear preparation or added fats. Do not generate a weekly menu."}\n${portionRules}${repairAttempt ? `\nRespond with valid JSON using this contract: ${JSON.stringify(responseSchema)}. Answer the latest user text, not a category. For example food names are Boiled eggs or Samosa, portions are 2 large boiled eggs or 1 medium samosa; these are examples, not facts to copy into unrelated answers.` : ""}`,
+                : `${fullWeekRequest ? instructions : chatInstructions}\nResolved diet: ${dietFor(body.context.profile) || "unspecified"}.\n${fullWeekRequest ? menuRules : "For chat, return message, kind, foods and adjustments as specified by the schema. Include estimated protein and fibre grams in every food and meal; use honest assumptions. For ordinary conversational answers without a food preview, use kind message and empty foods/adjustments. For a craving or food the user wishes to eat, NEVER return kind log. Explain its estimated calories and how it fits their remaining budget. If they want room in today's menu, return kind adjustment with the craving food in foods and EXACTLY ONE replacement meal in adjustments, using today's day code from context. Usually adjust dinner, preserving the diet and a reasonable meal rather than skipping it. Use context.foodLogs as the authority for what was eaten; planned meals are not eaten. The replacement must target an existing meal in today's approved plan. If there is no approved meal, or the food/portion is unclear, ask a useful question with kind message and empty foods/adjustments. For actual consumption, use kind log, foods containing the actual food and empty adjustments. Approval changes a meal; only separate confirmation logs a craving. All calorie accounting and remaining values are application calculated. Do not promise an exact fit when estimates exceed the budget or recommend compensatory restriction. Do not invent missing prior consumption. Estimate any food the user actually ate, whether or not it is on their menu. Do not substitute a planned meal for their actual food. Use chat history for short portion follow-ups. Ask about unclear preparation or added fats. Do not generate a weekly menu."}\n${reviewRequest ? `This is a remaining-meal planning request, not a food logging or portion question. Use today's confirmed logs and remaining budget. Propose replacements for exactly these still-uneaten meal slots: ${reviewSlots.join(", ")}. Return kind adjustment, adjustments containing one replacement per requested slot, and an explanatory message. The food has already been logged: do not output foods or log it again. If no saved menu is available, explain a practical meal suggestion with kind message rather than inventing a replacement target. Never adjust any other slot or day.` : portionRules}${repairAttempt || reviewRequest ? `\nRespond with valid JSON using this contract: ${JSON.stringify(responseSchema)}. Answer the latest user text, not a category. For example food names are Boiled eggs or Samosa, portions are 2 large boiled eggs or 1 medium samosa; these are examples, not facts to copy into unrelated answers.` : ""}`,
             },
           ],
         },
@@ -345,6 +364,7 @@ export async function handleApi(
       });
     }
     const parsed = JSON.parse(text);
+    if (reviewRequest && parsed) parsed.foods = [];
     if (!fullWeekRequest && parsed && parsed.kind !== "plan") parsed.days = [];
     const onlyMealLabel = (value) =>
       typeof value === "string" &&
@@ -388,7 +408,8 @@ export async function handleApi(
         error: "AI returned malformed output. Your saved data is unchanged.",
       });
     if (
-      (parsed.kind === "message" && onlyMealLabel(parsed.message)) ||
+      (["message", "adjustment"].includes(parsed.kind) &&
+        onlyMealLabel(parsed.message)) ||
       (["log", "adjustment"].includes(parsed.kind) &&
         parsed.foods.some(
           (food) =>
@@ -411,8 +432,9 @@ export async function handleApi(
           deadline,
         );
       return json(502, {
-        error:
-          "Gemini did not answer the portion question. Please retry, or enter the food and portion manually. Nothing was logged.",
+        error: reviewRequest
+          ? "Gemini did not return a usable meal suggestion. Your menu is unchanged; please retry the review."
+          : "Gemini did not answer the portion question. Please retry, or enter the food and portion manually. Nothing was logged.",
       });
     }
     if (parsed.kind === "adjustment") {
@@ -422,27 +444,36 @@ export async function handleApi(
       if (
         !today ||
         !Array.isArray(adjustments) ||
-        adjustments.length !== 1 ||
-        !parsed.foods.length
+        adjustments.length < 1 ||
+        adjustments.length > 2 ||
+        new Set(adjustments.map((a) => a.meal?.slot)).size !==
+          adjustments.length ||
+        (reviewRequest &&
+          (adjustments.length !== reviewSlots.length ||
+            !reviewSlots.every((slot) =>
+              adjustments.some((a) => a.meal?.slot === slot),
+            ))) ||
+        (!reviewRequest && !parsed.foods.length)
       )
         return json(502, {
           error: "The meal adjustment was incomplete. Your plan is unchanged.",
         });
-      const a = adjustments[0];
-      const original = body.context.plan
-        ?.find((d) => d.day === weekday)
-        ?.meals?.find((m) => m.slot === a.meal?.slot);
-      if (
-        a.day !== weekday ||
-        !original ||
-        !a.meal ||
-        !Array.isArray(a.meal.ingredients) ||
-        dietConflict(a.meal, body.context.profile)
-      )
-        return json(502, {
-          error:
-            "The proposed adjustment does not match today's menu or your diet. Your plan is unchanged.",
-        });
+      for (const a of adjustments) {
+        const original = body.context.plan
+          ?.find((d) => d.day === weekday)
+          ?.meals?.find((m) => m.slot === a.meal?.slot);
+        if (
+          a.day !== weekday ||
+          !original ||
+          !a.meal ||
+          !Array.isArray(a.meal.ingredients) ||
+          dietConflict(a.meal, body.context.profile)
+        )
+          return json(502, {
+            error:
+              "The proposed adjustment does not match today's menu or your diet. Your plan is unchanged.",
+          });
+      }
     }
     if (parsed.kind === "plan") {
       const aliases = {

@@ -29,6 +29,7 @@ import {
   type Profile,
   type Food,
   type Meal,
+  type Day,
   type Proposal,
 } from "./model";
 const KEY = "nudge.local.v1";
@@ -76,6 +77,10 @@ function read() {
             }
           : c,
       );
+    if (s && Array.isArray(s.foods) && s.mealReview === undefined)
+      s.mealReview = s.foods.some((f: Food) => f.date === dateKey())
+        ? dateKey()
+        : "";
     return s && Array.isArray(s.foods) && Array.isArray(s.chat)
       ? (s as State)
       : emptyState();
@@ -691,7 +696,11 @@ export default function App() {
     message: string,
     source: "chat" | "menu" = "chat",
     target?: { day: string; index: number },
-    logOptions?: { logDate: string; editId: string },
+    logOptions?: {
+      logDate?: string;
+      editId?: string;
+      adjustmentSlots?: string[];
+    },
   ) => {
     if (lock.current || !p || !message.trim()) return;
     if (/^i (?:don['’]t|do not) care today[.!]?$/i.test(message.trim())) {
@@ -725,7 +734,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          operation: source,
+          operation: logOptions?.adjustmentSlots ? "adjustment" : source,
           context: {
             profile: {
               ...p,
@@ -750,6 +759,7 @@ export default function App() {
             history: state.chat.slice(-12),
             currentPreview: proposal,
             consumedOn: logOptions?.logDate,
+            adjustmentSlots: logOptions?.adjustmentSlots,
           },
         }),
         signal: AbortSignal.timeout(65000),
@@ -824,11 +834,11 @@ export default function App() {
                     state.foods.filter((f) => f.date === day),
                   ),
                   meal: JSON.stringify(
-                    state.plan
-                      .find((d) => d.day === result.adjustments[0]?.day)
-                      ?.meals.find(
-                        (m) => m.slot === result.adjustments[0]?.meal.slot,
-                      ),
+                    result.adjustments.map((a) =>
+                      state.plan
+                        .find((d) => d.day === a.day)
+                        ?.meals.find((m) => m.slot === a.meal.slot),
+                    ),
                   ),
                 }
               : undefined,
@@ -1013,6 +1023,7 @@ export default function App() {
         ? state.foods.map((f) => (f.id === editId ? item : f))
         : [...state.foods, item],
       pending: "",
+      mealReview: logDate === day ? day : state.mealReview,
     });
     setManual(false);
     setEditId("");
@@ -1054,12 +1065,14 @@ export default function App() {
     if (proposal.kind === "adjustment") {
       try {
         validateResponse({ ...proposal, message: "Meal adjustment" }, p!);
-        const a = proposal.adjustments![0];
+        const changes = proposal.adjustments!;
         const weekday = days[(new Date().getDay() + 6) % 7];
-        const current = state.plan
-          .find((d) => d.day === weekday)
-          ?.meals.find((m) => m.slot === a.meal.slot);
-        if (a.day !== weekday || !current)
+        const originals = changes.map((a) =>
+          state.plan
+            .find((d) => d.day === weekday)
+            ?.meals.find((m) => m.slot === a.meal.slot),
+        );
+        if (changes.some((a) => a.day !== weekday) || originals.some((m) => !m))
           throw Error(
             "This adjustment no longer matches today's saved menu. Ask again.",
           );
@@ -1067,40 +1080,37 @@ export default function App() {
           proposal.basis &&
           (proposal.basis.intake !==
             JSON.stringify(state.foods.filter((f) => f.date === day)) ||
-            proposal.basis.meal !== JSON.stringify(current))
+            proposal.basis.meal !== JSON.stringify(originals))
         )
           throw Error(
             "Your intake or menu changed since this suggestion. Ask again for an updated adjustment.",
           );
+        const replace = (plan: Day[], approved: boolean) =>
+          plan.map((d) => ({
+            ...d,
+            meals: d.meals.map((m) => {
+              const a = changes.find(
+                (a) => a.day === d.day && a.meal.slot === m.slot,
+              );
+              return a ? { ...a.meal, approved } : m;
+            }),
+          }));
         update({
-          draft: state.draft.map((d) =>
-            d.day !== a.day
-              ? d
-              : {
-                  ...d,
-                  meals: d.meals.map((m) =>
-                    m.slot === a.meal.slot ? { ...a.meal, approved: false } : m,
-                  ),
-                },
-          ),
-          plan: state.plan.map((d) =>
-            d.day !== a.day
-              ? d
-              : {
-                  ...d,
-                  meals: d.meals.map((m) =>
-                    m.slot === a.meal.slot ? { ...a.meal, approved: true } : m,
-                  ),
-                },
-          ),
+          plan: replace(state.plan, true),
+          draft: replace(state.draft, false),
+          mealReview: "",
         });
-        setProposal({
-          kind: "log",
-          fromCraving: true,
-          date: day,
-          foods: proposal.foods,
-          days: [],
-        });
+        setProposal(
+          proposal.foods.length
+            ? {
+                kind: "log",
+                fromCraving: true,
+                date: day,
+                foods: proposal.foods,
+                days: [],
+              }
+            : null,
+        );
         setError("");
       } catch (e) {
         setError((e as Error).message);
@@ -1128,6 +1138,7 @@ export default function App() {
           })),
         ],
         pending: "",
+        mealReview: (proposal.logDate || day) === day ? day : state.mealReview,
       });
     } else {
       setSwapPreview(null);
@@ -1448,7 +1459,9 @@ export default function App() {
                 {proposal.kind === "log"
                   ? "Count this as eaten?"
                   : proposal.kind === "adjustment"
-                    ? "Make room for your craving?"
+                    ? proposal.foods.length
+                      ? "Make room for your craving?"
+                      : "Your remaining meals, revised"
                     : "Your plan, revised."}
               </h2>
               {proposal.kind === "log" ? (
@@ -1467,15 +1480,17 @@ export default function App() {
                 ))
               ) : proposal.kind === "adjustment" ? (
                 <>
-                  <p>
-                    Considering:{" "}
-                    {proposal.foods
-                      .map(
-                        (f) =>
-                          `${f.portion} ${f.name} (${f.calories} kcal estimated)`,
-                      )
-                      .join(", ")}
-                  </p>
+                  {proposal.foods.length > 0 && (
+                    <p>
+                      Considering:{" "}
+                      {proposal.foods
+                        .map(
+                          (f) =>
+                            `${f.portion} ${f.name} (${f.calories} kcal estimated)`,
+                        )
+                        .join(", ")}
+                    </p>
+                  )}
                   {proposal.adjustments?.map((a) => (
                     <div className="preview-food" key={a.meal.slot}>
                       <strong>
@@ -1495,12 +1510,14 @@ export default function App() {
                       t.remaining -
                         proposal.foods.reduce((sum, f) => sum + f.calories, 0),
                     )}{" "}
-                    kcal would remain after this craving. The revised meal is
-                    planned, not eaten.
+                    {proposal.foods.length
+                      ? "kcal would remain after this craving."
+                      : "kcal remaining for your planned meals."}{" "}
+                    Revised meals are planned, not eaten.
                   </p>
                   <small>
-                    Approve changes only this meal. The craving counts only when
-                    you confirm eating it.
+                    Approval changes only the meals shown. It never adds food to
+                    your intake.
                   </small>
                 </>
               ) : (
@@ -1521,7 +1538,7 @@ export default function App() {
                       ? "I ate it — log food"
                       : "Confirm & log"
                     : proposal.kind === "adjustment"
-                      ? `Approve ${proposal.adjustments?.[0].meal.slot.toLowerCase() || "meal"} adjustment`
+                      ? `Approve ${proposal.adjustments?.map((a) => a.meal.slot.toLowerCase()).join(" & ") || "meal"} adjustment`
                       : "Review revised draft"}{" "}
                   <Check size={17} />
                 </button>
@@ -1573,6 +1590,50 @@ export default function App() {
               </div>
             </section>
           )}
+          {!proposal &&
+            !busy &&
+            state.mealReview === day &&
+            state.plan.some(
+              (d) => d.day === days[(new Date().getDay() + 6) % 7],
+            ) && (
+              <section className="card" aria-label="Review remaining meals">
+                <h2>Shall we readjust your remaining meals?</h2>
+                <p>
+                  Your confirmed food is counted. Choose only meals you haven't
+                  eaten yet; we'll show a proposal before changing them.
+                </p>
+                <div className="actions">
+                  <button
+                    className="primary"
+                    onClick={() =>
+                      ask(
+                        "Please readjust today's lunch and dinner around what I've eaten.",
+                        "chat",
+                        undefined,
+                        { adjustmentSlots: ["Lunch", "Dinner"] },
+                      )
+                    }
+                  >
+                    Review lunch & dinner
+                  </button>
+                  <button
+                    onClick={() =>
+                      ask(
+                        "Please readjust tonight's dinner around what I've eaten. Lunch is already done.",
+                        "chat",
+                        undefined,
+                        { adjustmentSlots: ["Dinner"] },
+                      )
+                    }
+                  >
+                    Only dinner remains
+                  </button>
+                  <button onClick={() => update({ mealReview: "" })}>
+                    Keep my menu
+                  </button>
+                </div>
+              </section>
+            )}
           <div className="quick-actions">
             <button onClick={() => showManual()}>
               <Plus size={15} /> Log food

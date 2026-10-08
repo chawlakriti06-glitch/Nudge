@@ -873,3 +873,95 @@ test("an unfamiliar food description opens AI review without typed nutrition", a
     page.getByRole("progressbar", { name: "Daily calorie intake" }),
   ).toHaveAttribute("aria-valuenow", "0");
 });
+test("confirmed extra food offers lunch and dinner review without double-counting intake", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("remainingReviewFixture")) return;
+    sessionStorage.setItem("remainingReviewFixture", "yes");
+    const s = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    s.plan = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+      day,
+      meals: ["Breakfast", "Lunch", "Dinner"].map((slot) => ({
+        slot,
+        name: "Original dal",
+        portion: "1 bowl",
+        ingredients: ["dal"],
+        calories: 500,
+        protein: 15,
+        fibre: 7,
+        assumptions: "Estimate",
+        approved: true,
+      })),
+    }));
+    localStorage.setItem("nudge.local.v1", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Log food" }).click();
+  await page.getByLabel("Food", { exact: true }).fill("1 medium samosa");
+  await page.getByLabel("Portion", { exact: true }).fill("80 g");
+  await nutritionOverride(page);
+  await page.getByLabel("Estimated calories", { exact: true }).fill("250");
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Review remaining meals" }),
+  ).toBeVisible();
+  await page.route("**/api/chat", async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.operation).toBe("adjustment");
+    expect(body.context.adjustmentSlots).toEqual(["Lunch", "Dinner"]);
+    expect(body.context.eaten).toBe(250);
+    await route.fulfill({
+      json: {
+        message: "Here are lunch and dinner suggestions",
+        kind: "adjustment",
+        foods: [],
+        days: [],
+        adjustments: ["Lunch", "Dinner"].map((slot) => ({
+          day: body.context.weekday,
+          meal: {
+            slot,
+            name: `${slot} revised dal`,
+            portion: "1 small bowl",
+            ingredients: ["dal"],
+            calories: 400,
+            protein: 12,
+            fibre: 6,
+            assumptions: "Estimate",
+          },
+        })),
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Review lunch & dinner" }).click();
+  await expect(
+    page.getByText("Today's revised lunch: Lunch revised dal"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Today's revised dinner: Dinner revised dal"),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Approve lunch & dinner adjustment" })
+    .click();
+  await expect(
+    page.getByRole("progressbar", { name: "Daily calorie intake" }),
+  ).toHaveAttribute("aria-valuetext", "250 of 1800 kcal");
+  await expect(
+    page.getByRole("button", { name: "I ate it — log food" }),
+  ).toHaveCount(0);
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(saved.foods).toHaveLength(1);
+  expect(
+    saved.plan
+      .flatMap((d: any) => d.meals)
+      .filter((m: any) => m.name.includes("revised")),
+  ).toHaveLength(2);
+  expect(saved.plan.every((d: any) => d.meals[0].name === "Original dal")).toBe(
+    true,
+  );
+});

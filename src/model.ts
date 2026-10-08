@@ -61,6 +61,7 @@ export type State = {
   paused: string;
   pending: string;
   proposal?: Proposal | null;
+  mealReview?: string;
 };
 export const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export const slots = (count: number) =>
@@ -236,33 +237,36 @@ export function validateResponse(raw: unknown, p: Profile) {
   if (r.kind === "adjustment") {
     if (
       !Array.isArray(r.adjustments) ||
-      r.adjustments.length !== 1 ||
-      !r.foods.length
+      r.adjustments.length < 1 ||
+      r.adjustments.length > 2 ||
+      new Set(r.adjustments.map((a) => a.meal?.slot)).size !==
+        r.adjustments.length
     )
       throw Error(
-        "A meal adjustment must include one replacement and the food you are considering.",
+        "A meal adjustment must include one or two distinct replacement meals.",
       );
-    const a = r.adjustments[0];
-    const m = a.meal;
-    if (
-      !days.includes(a.day) ||
-      !m ||
-      !slots(p.meals).includes(m.slot) ||
-      typeof m.name !== "string" ||
-      !m.name.trim() ||
-      typeof m.portion !== "string" ||
-      !m.portion.trim() ||
-      !Array.isArray(m.ingredients) ||
-      !m.ingredients.length ||
-      !m.ingredients.every((i: unknown) => typeof i === "string") ||
-      !number(m.calories) ||
-      typeof m.assumptions !== "string" ||
-      (m.protein != null && !number(m.protein)) ||
-      (m.fibre != null && !number(m.fibre))
-    )
-      throw Error("The proposed meal is incomplete. Your plan is unchanged.");
-    const error = conflict(m, p);
-    if (error) throw Error(`${error}. Your plan is unchanged.`);
+    for (const a of r.adjustments) {
+      const m = a.meal;
+      if (
+        !days.includes(a.day) ||
+        !m ||
+        !slots(p.meals).includes(m.slot) ||
+        typeof m.name !== "string" ||
+        !m.name.trim() ||
+        typeof m.portion !== "string" ||
+        !m.portion.trim() ||
+        !Array.isArray(m.ingredients) ||
+        !m.ingredients.length ||
+        !m.ingredients.every((i: unknown) => typeof i === "string") ||
+        !number(m.calories) ||
+        typeof m.assumptions !== "string" ||
+        (m.protein != null && !number(m.protein)) ||
+        (m.fibre != null && !number(m.fibre))
+      )
+        throw Error("The proposed meal is incomplete. Your plan is unchanged.");
+      const error = conflict(m, p);
+      if (error) throw Error(`${error}. Your plan is unchanged.`);
+    }
   }
   if (r.kind === "plan") {
     if (r.days.length !== 7 || new Set(r.days.map((d) => d.day)).size !== 7)

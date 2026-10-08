@@ -367,17 +367,13 @@ test("a meal label gets one real provider correction, not a fabricated assistant
     async (_url: string, opts: any) => {
       calls++;
       const payload = JSON.parse(opts.body);
-      if (calls === 1)
-        expect(
-          payload.generationConfig.responseJsonSchema.properties.kind.enum,
-        ).toEqual(["message", "log", "adjustment"]);
-      else
-        expect(payload.generationConfig).not.toHaveProperty(
-          "responseJsonSchema",
-        );
-      expect(payload.systemInstruction.parts[0].text).toContain(
-        "how many eggs",
+      expect(payload.generationConfig).not.toHaveProperty("responseJsonSchema");
+      expect(payload.toolConfig.functionCallingConfig.mode).toBe(
+        calls === 1 ? "AUTO" : "NONE",
       );
+      expect(
+        payload.tools[0].functionDeclarations.map((f: any) => f.name),
+      ).toContain("preview_food_log");
       const message =
         calls === 1
           ? "Breakfast"
@@ -411,7 +407,7 @@ test("a meal label gets one real provider correction, not a fabricated assistant
 test("unhelpful labels stop after one correction and never log food", async () => {
   let calls = 0;
   const r = await handleApi(
-    request(),
+    request({ message: "I had eggs", context: { profile: { meals: 3 } } }),
     { NUDGE_GEMINI_API_KEY: "test" },
     async () => {
       calls++;
@@ -502,7 +498,7 @@ test("rejects meat in vegetarian drafts and repetitive weekly breakfasts", async
     );
   }
 });
-test("food estimates use a compact schema and omit full-week instructions", async () => {
+test("food previews use an optional action tool and omit full-week instructions", async () => {
   const response = await handleApi(
     request({
       message: "i had 2 eggs and 1 bread toast. how many calories is that?",
@@ -520,9 +516,9 @@ test("food estimates use a compact schema and omit full-week instructions", asyn
       expect(sent.contents.at(-1).parts.at(-1).text).toBe(
         "i had 2 eggs and 1 bread toast. how many calories is that?",
       );
-      expect(sent.generationConfig.responseJsonSchema.required).not.toContain(
-        "days",
-      );
+      expect(
+        sent.tools[0].functionDeclarations[0].parametersJsonSchema.required,
+      ).not.toContain("days");
       expect(sent.systemInstruction.parts[0].text).not.toContain(
         "Return the complete revised week. When the schema",
       );
@@ -631,7 +627,7 @@ test("a short off-menu follow-up corrects meal-label food previews", async () =>
   expect(calls).toBe(2);
   expect((await response.json()).foods[0].name).toBe("Eggs and toast");
 });
-test("schema rejection retries JSON mode on the same model and validates output", async () => {
+test("unsupported tools retry a conversational reply on the same model without claiming an action", async () => {
   let calls = 0;
   const r = await handleApi(
     request({
@@ -647,7 +643,9 @@ test("schema rejection retries JSON mode on the same model and validates output"
       const payload = JSON.parse(init.body as string);
       calls++;
       if (calls === 1) {
-        expect(payload.generationConfig.responseJsonSchema).toBeDefined();
+        expect(payload.tools[0].functionDeclarations[0].name).toBe(
+          "preview_food_log",
+        );
         return new Response(
           JSON.stringify({
             error: { message: "Request contains an invalid argument" },
@@ -656,9 +654,8 @@ test("schema rejection retries JSON mode on the same model and validates output"
         );
       }
       expect(payload.generationConfig).not.toHaveProperty("responseJsonSchema");
-      expect(payload.generationConfig.responseMimeType).toBe(
-        "application/json",
-      );
+      expect(payload.generationConfig).not.toHaveProperty("responseMimeType");
+      expect(payload).not.toHaveProperty("tools");
       return new Response(
         JSON.stringify({
           candidates: [
@@ -666,21 +663,7 @@ test("schema rejection retries JSON mode on the same model and validates output"
               content: {
                 parts: [
                   {
-                    text: JSON.stringify({
-                      kind: "log",
-                      message: "Food estimate",
-                      foods: [
-                        {
-                          name: "Eggs and toast",
-                          portion: "2 boiled eggs and 1 slice",
-                          calories: 230,
-                          protein: 15,
-                          fibre: 2,
-                          assumptions: "No butter or oil",
-                        },
-                      ],
-                      adjustments: [],
-                    }),
+                    text: "Your eggs and toast are about 230 kcal. Would you like to prepare a preview for confirmation?",
                   },
                 ],
               },
@@ -692,7 +675,11 @@ test("schema rejection retries JSON mode on the same model and validates output"
   );
   expect(calls).toBe(2);
   expect(r.status).toBe(200);
-  expect((await r.json()).foods[0].protein).toBe(15);
+  expect(await r.json()).toMatchObject({
+    kind: "message",
+    foods: [],
+    adjustments: [],
+  });
 });
 
 test("a craving adjustment can only target a meal in today's approved menu", async () => {
@@ -996,8 +983,9 @@ test("actual consumption after lunch advice still requests a validated food prev
     { NUDGE_GEMINI_API_KEY: "test-key" },
     async (_url: string, init: RequestInit) => {
       const payload = JSON.parse(init.body as string);
-      expect(payload.generationConfig.responseMimeType).toBe(
-        "application/json",
+      expect(payload.generationConfig).not.toHaveProperty("responseMimeType");
+      expect(payload.tools[0].functionDeclarations[0].name).toBe(
+        "preview_food_log",
       );
       return new Response(
         JSON.stringify({
@@ -1128,4 +1116,238 @@ test("a brownie craving without a portion gets conversation without food logging
       adjustments: [],
     });
   }
+});
+
+test("one conversational interface handles a complete craving, portion, consumption and correction dialogue", async () => {
+  const history: { role: string; text: string }[] = [];
+  const food = {
+    name: "Chocolate brownie",
+    portion: "1 small homemade square (40 g)",
+    calories: 180,
+    protein: 3,
+    fibre: 1,
+    assumptions: "Recipe estimate including butter; no frosting",
+  };
+  const turns = [
+    {
+      message: "yaar aaj bahut thak gayi",
+      reply: "Long day? We can keep food simple. What would feel good?",
+    },
+    {
+      message: "something chocolatey",
+      reply:
+        "A brownie or a few squares of chocolate could work. Which sounds good?",
+    },
+    { message: "brownie", reply: "What size piece are you thinking of?" },
+    {
+      message: "one small homemade square",
+      reply:
+        "A 40 g homemade square might be around 180 kcal. This is only a craving discussion until you eat it.",
+    },
+    {
+      message: "okay i ate it",
+      reply:
+        "Here’s a preview of that small homemade brownie. Confirm it to add it to your food log.",
+      food,
+    },
+    {
+      message: "actually half of that",
+      reply: "Updated preview for half the brownie, not a second entry.",
+      food: {
+        ...food,
+        portion: "Half a small square (20 g)",
+        calories: 90,
+        protein: 1.5,
+        fibre: 0.5,
+      },
+    },
+  ];
+  let currentPreview: unknown;
+  for (const turn of turns) {
+    const response = await handleApi(
+      request({
+        operation: "chat",
+        message: turn.message,
+        context: {
+          profile: { meals: 3, diet: "non-vegetarian" },
+          remaining: 790,
+          history,
+          currentPreview,
+        },
+      }),
+      { NUDGE_GEMINI_API_KEY: "test" },
+      async (_url: string, init: RequestInit) => {
+        const payload = JSON.parse(init.body as string);
+        expect(payload.generationConfig).not.toHaveProperty(
+          "responseJsonSchema",
+        );
+        expect(payload.generationConfig).not.toHaveProperty("responseMimeType");
+        expect(payload.toolConfig.functionCallingConfig.mode).toBe("AUTO");
+        expect(payload.contents.at(-1).parts.at(-1).text).toBe(turn.message);
+        expect(
+          payload.contents.slice(0, -1).map((c: any) => c.parts[0].text),
+        ).toEqual(history.map((h) => h.text));
+        const part = turn.food
+          ? {
+              functionCall: {
+                name: "preview_food_log",
+                args: { message: turn.reply, foods: [turn.food] },
+              },
+            }
+          : { text: turn.reply };
+        return new Response(
+          JSON.stringify({
+            candidates: [{ finishReason: "STOP", content: { parts: [part] } }],
+          }),
+        );
+      },
+    );
+    expect(response.status).toBe(200);
+    const reply = await response.json();
+    expect(reply.message).toBe(turn.reply);
+    expect(reply.kind).toBe(turn.food ? "log" : "message");
+    expect(reply.foods).toEqual(turn.food ? [turn.food] : []);
+    expect(reply.days).toEqual([]);
+    if (turn.food) currentPreview = reply;
+    history.push(
+      { role: "user", text: turn.message },
+      { role: "assistant", text: reply.message },
+    );
+  }
+});
+
+test("a malformed optional action falls back to a real model clarification instead of breaking chat", async () => {
+  let calls = 0;
+  const response = await handleApi(
+    request({
+      operation: "chat",
+      message: "I had a bowl of dal",
+      context: { profile: { meals: 3 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async (_url: string, init: RequestInit) => {
+      const payload = JSON.parse(init.body as string);
+      calls++;
+      if (calls === 1)
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      functionCall: {
+                        name: "preview_food_log",
+                        args: {
+                          message: "Dal preview",
+                          foods: [
+                            {
+                              name: "Dal",
+                              portion: "1 bowl",
+                              calories: -5,
+                              protein: 12,
+                              fibre: 5,
+                              assumptions: "Unknown bowl size",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+      expect(payload.toolConfig.functionCallingConfig.mode).toBe("NONE");
+      expect(payload.systemInstruction.parts[0].text).toContain(
+        "previous action could not be validated",
+      );
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: "Was that a small katori or a large bowl, and was there a tadka?",
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    },
+  );
+  expect(calls).toBe(2);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    kind: "message",
+    message: "Was that a small katori or a large bowl, and was there a tadka?",
+    foods: [],
+    adjustments: [],
+  });
+});
+
+test("optional meal changes are validated separately from ordinary conversation", async () => {
+  const original = {
+    slot: "Dinner",
+    name: "Dal and roti",
+    portion: "1 katori dal, 2 rotis",
+    ingredients: ["lentils", "wheat"],
+    calories: 500,
+    protein: 18,
+    fibre: 8,
+    assumptions: "1 tsp oil",
+  };
+  const replacement = {
+    ...original,
+    portion: "1 katori dal, 1 roti, 1 bowl sabzi",
+    calories: 420,
+  };
+  const response = await handleApi(
+    request({
+      operation: "chat",
+      message: "Can we change dinner now?",
+      context: {
+        profile: { meals: 3, diet: "vegetarian" },
+        today: "2026-10-08",
+        weekday: "Thu",
+        foodLogs: [{ name: "Brownie", calories: 180 }],
+        plan: [{ day: "Thu", meals: [original] }],
+      },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () =>
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    functionCall: {
+                      name: "propose_meal_adjustment",
+                      args: {
+                        message:
+                          "Here is an optional dinner change for your approval.",
+                        foods: [],
+                        adjustments: [{ day: "Thu", meal: replacement }],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    kind: "adjustment",
+    foods: [],
+    adjustments: [{ day: "Thu", meal: replacement }],
+  });
 });

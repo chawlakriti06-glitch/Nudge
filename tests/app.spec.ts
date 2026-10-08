@@ -1,4 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
+// @ts-expect-error standalone server module
+import { handleApi } from "../server/api.mjs";
 const profile = {
   name: "Kriti",
   height: 165,
@@ -1297,4 +1299,126 @@ test("retrying a failed craving keeps one user bubble and never logs the intende
       () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods,
     ),
   ).toHaveLength(0);
+});
+
+test("multi-turn conversation uses optional server actions, corrects a preview, and counts only confirmation", async ({
+  page,
+}) => {
+  await seed(page);
+  const brownie = {
+    name: "Homemade brownie",
+    portion: "1 small square (40 g)",
+    calories: 180,
+    protein: 3,
+    fibre: 1,
+    assumptions: "Recipe estimate including butter, no frosting",
+  };
+  const turns = [
+    {
+      message: "feeling exhausted",
+      reply: "That sounds tiring. We can keep food simple today.",
+    },
+    {
+      message: "I fancy a brownie",
+      reply: "What size brownie are you thinking of?",
+    },
+    {
+      message: "small homemade",
+      reply:
+        "A small homemade square might be around 180 kcal. Have you eaten it yet?",
+    },
+    {
+      message: "I ate half",
+      reply: "Here is a preview for half a small brownie.",
+      food: {
+        ...brownie,
+        portion: "Half a small square (20 g)",
+        calories: 90,
+        protein: 1.5,
+        fibre: 0.5,
+      },
+    },
+    {
+      message: "actually the whole piece",
+      reply: "Updated that preview to the whole piece.",
+      food: brownie,
+    },
+    {
+      message: "thanks, you're a lifesaver",
+      reply: "You’re welcome. No perfect days required.",
+    },
+  ];
+  await page.route("**/api/chat", async (route) => {
+    const result = await handleApi(
+      new Request("https://nudge.example/api/chat", {
+        method: "POST",
+        body: route.request().postData()!,
+      }),
+      { NUDGE_GEMINI_API_KEY: "test-only" },
+      async (_url: string, init: RequestInit) => {
+        const payload = JSON.parse(init.body as string);
+        const message = payload.contents.at(-1).parts.at(-1).text;
+        const turn = turns.find((t) => t.message === message)!;
+        expect(turn).toBeDefined();
+        expect(payload.generationConfig).not.toHaveProperty(
+          "responseJsonSchema",
+        );
+        if (message === "actually the whole piece")
+          expect(
+            JSON.parse(
+              payload.contents
+                .at(-1)
+                .parts[0].text.split(": ")
+                .slice(1)
+                .join(": "),
+            ).currentPreview.foods[0].calories,
+          ).toBe(90);
+        const part = turn.food
+          ? {
+              functionCall: {
+                name: "preview_food_log",
+                args: { message: turn.reply, foods: [turn.food] },
+              },
+            }
+          : { text: turn.reply };
+        return new Response(
+          JSON.stringify({ candidates: [{ content: { parts: [part] } }] }),
+        );
+      },
+    );
+    await route.fulfill({ status: result.status, json: await result.json() });
+  });
+  for (const turn of turns.slice(0, 5)) {
+    await page.getByLabel("Message", { exact: true }).fill(turn.message);
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.locator(".bubble.assistant").last()).toContainText(
+      turn.reply,
+    );
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods,
+      ),
+    ).toHaveLength(0);
+  }
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await assertHomeIntake(
+    page,
+    "Daily calorie intake",
+    "aria-valuetext",
+    "180 of 1800 kcal",
+  );
+  const final = turns.at(-1)!;
+  await page.getByLabel("Message", { exact: true }).fill(final.message);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator(".bubble.assistant").last()).toContainText(
+    final.reply,
+  );
+  const foods = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods,
+  );
+  expect(foods).toHaveLength(1);
+  expect(foods[0].calories).toBe(180);
 });

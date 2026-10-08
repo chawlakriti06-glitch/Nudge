@@ -1633,3 +1633,97 @@ test("dictation inserts at selection and does not repeat final results or overwr
   await emit();
   await expect(field).toHaveValue("I had three eggs today");
 });
+
+test("craving choices use the remaining budget and choosing one does not change the menu or intake", async ({
+  page,
+}) => {
+  await seed(page);
+  const date = await page.evaluate(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  await page.evaluate((date) => {
+    const state = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    state.foods = [
+      {
+        id: "eaten",
+        date,
+        name: "Meals already eaten",
+        portion: "Today",
+        calories: 1400,
+        protein: 40,
+        fibre: 15,
+        assumptions: "Confirmed estimate",
+      },
+    ];
+    localStorage.setItem("nudge.local.v1", JSON.stringify(state));
+  }, date);
+  await page.reload();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  let calls = 0;
+  await page.route("**/api/chat", async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.context.remaining).toBe(400);
+    if (calls++)
+      expect(
+        body.context.history.some(
+          (turn: any) =>
+            turn.role === "assistant" && turn.text.includes("Cocoa yoghurt"),
+        ),
+      ).toBe(true);
+    const response = await handleApi(
+      new Request("https://nudge.example/api/chat", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      { NUDGE_GEMINI_API_KEY: "test" },
+      async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text:
+                        calls === 1
+                          ? "You have about 400 kcal remaining. Three chocolatey options:\n1. Cocoa yoghurt — 150 g plain yoghurt, 1 tsp cocoa: about 120–150 kcal, unsweetened.\n2. Chocolate banana — half a banana and 10 g melted dark chocolate: about 110–130 kcal.\n3. Cocoa oats — 20 g oats, 100 ml milk, 1 tsp cocoa: about 150–180 kcal, no added sugar.\nWhich sounds good?"
+                          : "For the second option, slice half a banana and drizzle 10 g melted dark chocolate over it. This is still only an idea; tell me if you eat it.",
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ),
+    );
+    await route.fulfill({
+      status: response.status,
+      json: await response.json(),
+    });
+  });
+  const send = async (text: string) => {
+    await page
+      .getByRole("textbox", { name: "Message", exact: true })
+      .fill(text);
+    await page.getByRole("button", { name: "Send message" }).click();
+  };
+  await send("I feel like eating something chocolatey");
+  await expect(page.getByText("Cocoa yoghurt", { exact: false })).toBeVisible();
+  await send("the second one");
+  await expect(
+    page.getByText("slice half a banana", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Confirm & log", exact: true }),
+  ).toHaveCount(0);
+  const state = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(state.foods).toHaveLength(1);
+  expect(state.plan).toEqual([]);
+  expect(state.draft).toEqual([]);
+});

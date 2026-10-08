@@ -29,3 +29,13 @@ test("unknown recipes, missing quantities and added fat go to AI instead of gues
   ])
     expect(referenceEstimate(text)).toBeNull();
 });
+
+test("reference estimates accept explicit first-entry consumption without interpreting cravings as eaten", () => {
+  expect(referenceEstimate("I ate 2 eggs.")).toEqual(
+    referenceEstimate("2 eggs"),
+  );
+  expect(referenceEstimate("I had 2 rotis")).toEqual(
+    referenceEstimate("2 rotis"),
+  );
+  expect(referenceEstimate("I want 2 eggs")).toBeNull();
+});

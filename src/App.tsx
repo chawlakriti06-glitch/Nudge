@@ -1,3 +1,6 @@
+import { FoodIllustration } from "./FoodIllustration";
+import { MenuBasics } from "./MenuBasics";
+import { QuickSetup } from "./QuickSetup";
 import ReactMarkdown from "react-markdown";
 import { referenceEstimate } from "./nutrition";
 import { dietFor } from "./diet.js";
@@ -187,11 +190,11 @@ function ProfileForm({
         onSubmit={(e) => {
           e.preventDefault();
           if (
-            p.budget < 800 ||
+            (p.budget !== 0 && p.budget < 800) ||
             p.budget > 6000 ||
-            p.height < 100 ||
+            (p.height !== 0 && p.height < 100) ||
             p.height > 250 ||
-            p.weight < 25 ||
+            (p.weight !== 0 && p.weight < 25) ||
             p.weight > 350 ||
             !p.allergies.trim()
           ) {
@@ -217,15 +220,14 @@ function ProfileForm({
             <label>
               Height (cm)
               <input
-                required
                 type="number"
                 min="100"
                 max="250"
-                value={p.height}
+                value={p.height || ""}
                 onChange={(e) =>
                   set(
                     "height",
-                    e.target.value === "" ? "" : Number(e.target.value),
+                    e.target.value === "" ? 0 : Number(e.target.value),
                   )
                 }
               />
@@ -233,16 +235,15 @@ function ProfileForm({
             <label>
               Weight (kg)
               <input
-                required
                 type="number"
                 step="0.1"
                 min="25"
                 max="350"
-                value={p.weight}
+                value={p.weight || ""}
                 onChange={(e) =>
                   set(
                     "weight",
-                    e.target.value === "" ? "" : Number(e.target.value),
+                    e.target.value === "" ? 0 : Number(e.target.value),
                   )
                 }
               />
@@ -254,6 +255,7 @@ function ProfileForm({
               value={p.activity}
               onChange={(e) => set("activity", e.target.value)}
             >
+              <option value="">Not set yet</option>
               <option>Low</option>
               <option>Medium</option>
               <option>High</option>
@@ -266,6 +268,7 @@ function ProfileForm({
                 value={p.goal}
                 onChange={(e) => set("goal", e.target.value)}
               >
+                <option value="">Not set yet</option>
                 <option value="Lose">Lose weight</option>
                 <option value="Maintain">Maintain weight</option>
                 <option value="Gain">Gain weight</option>
@@ -468,14 +471,13 @@ function ProfileForm({
                 type="number"
                 min="1"
                 max="500"
-                value={p.proteinTarget ?? 60}
+                value={p.proteinTarget || ""}
                 onChange={(e) =>
                   set(
                     "proteinTarget",
-                    e.target.value === "" ? "" : Number(e.target.value),
+                    e.target.value === "" ? 0 : Number(e.target.value),
                   )
                 }
-                required
               />
             </label>
             <label>
@@ -484,25 +486,23 @@ function ProfileForm({
                 type="number"
                 min="1"
                 max="100"
-                value={p.fibreTarget ?? 25}
+                value={p.fibreTarget || ""}
                 onChange={(e) =>
                   set(
                     "fibreTarget",
-                    e.target.value === "" ? "" : Number(e.target.value),
+                    e.target.value === "" ? 0 : Number(e.target.value),
                   )
                 }
-                required
               />
             </label>
           </div>
           <small>
-            Editable starting targets: 60 g protein and 25 g fibre. Choose
-            targets that suit you.
+            Targets are optional. Choose values that suit you; intake is tracked
+            even without targets.
           </small>
           <label>
             Daily calorie budget (kcal)
             <input
-              required
               type="number"
               min="800"
               max="6000"
@@ -565,7 +565,8 @@ function IntakeRing({
   unit: string;
   unknown?: number;
 }) {
-  const progress = Math.min(100, Math.max(0, (value / (target || 1)) * 100));
+  const progress =
+    target > 0 ? Math.min(100, Math.max(0, (value / target) * 100)) : 0;
   return (
     <div className="intake-indicator">
       <div
@@ -575,7 +576,7 @@ function IntakeRing({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={progress}
-        aria-valuetext={`${value} of ${target} ${unit}${unknown ? `; ${unknown} entries missing nutrition` : ""}`}
+        aria-valuetext={`${target > 0 ? `${value} of ${target} ${unit}` : `${value} ${unit}; target not set`}${unknown ? `; ${unknown} entries missing nutrition` : ""}`}
       >
         <svg className="calorie-ring" viewBox="0 0 145 145" aria-hidden="true">
           <circle className="calorie-track" cx="72.5" cy="72.5" r="67" />
@@ -591,9 +592,7 @@ function IntakeRing({
         </svg>
         <div>
           <strong>{Math.round(value * 10) / 10}</strong>
-          <span>
-            / {target} {unit}
-          </span>
+          <span>{target > 0 ? `/ ${target} ${unit}` : unit}</span>
         </div>
       </div>
       <strong>{title}</strong>
@@ -637,7 +636,9 @@ export default function App() {
   });
   const [editId, setEditId] = useState("");
   const [editing, setEditing] = useState(false);
-  const [openDay, setOpenDay] = useState("Mon");
+  const [advancedSetup, setAdvancedSetup] = useState(false);
+  const [menuSettings, setMenuSettings] = useState(false);
+  const [openDay, setOpenDay] = useState(days[(new Date().getDay() + 6) % 7]);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [privacy, setPrivacy] = useState(false);
   const [mealEdit, setMealEdit] = useState<{
@@ -652,6 +653,7 @@ export default function App() {
   const requestEpoch = useRef(0);
   const aiSucceeded = useRef(false);
   const recognition = useRef<any>(null);
+  const firstEntryAttempt = useRef(false);
   const messageInput = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const resize = () => {
@@ -754,6 +756,18 @@ export default function App() {
   const p = state.profile;
   const t = totals(state.foods, p?.budget || 0, day);
   const paused = state.paused === day;
+  const weekday = days[(new Date().getDay() + 6) % 7];
+  const todayMeals =
+    approvedMenu(state.plan, state.draft).find((d) => d.day === weekday)
+      ?.meals || [];
+  const wasEaten = (meal: Meal) =>
+    state.foods.some(
+      (food) =>
+        food.date === day &&
+        food.menuDay === weekday &&
+        food.menuSlot === meal.slot,
+    );
+  const nextMeal = todayMeals.find((meal) => !wasEaten(meal));
   const update = (patch: Partial<State>) =>
     setState((s) => ({ ...s, ...patch }));
   const ask = async (
@@ -768,6 +782,11 @@ export default function App() {
     },
   ) => {
     if (lock.current || !p || !message.trim()) return;
+    if (source === "menu" && !p.budget) {
+      setMenuSettings(true);
+      setScreen("menu");
+      return;
+    }
     if (/^i (?:don['’]t|do not) care today[.!]?$/i.test(message.trim())) {
       setState((s) => ({
         ...s,
@@ -814,7 +833,7 @@ export default function App() {
             nutrients: { protein: t.protein, fibre: t.fibre },
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             eaten: t.eaten,
-            remaining: t.remaining,
+            remaining: p?.budget ? t.remaining : null,
             paused,
             approvedMenu: approvedMenu(state.plan, state.draft),
             menuDraft: state.draft,
@@ -1085,6 +1104,36 @@ export default function App() {
         "Meal count changed. Your approved plan and food history are preserved. Generate a revised draft to approve.",
       );
   };
+  useEffect(() => {
+    if (!state.profile) {
+      firstEntryAttempt.current = false;
+      return;
+    }
+    if (
+      screen !== "home" ||
+      !state.pending ||
+      state.chat.length ||
+      firstEntryAttempt.current
+    )
+      return;
+    const standard = /^i (?:ate|had|have eaten)\b/i.test(state.pending.trim())
+      ? referenceEstimate(state.pending)
+      : null;
+    if (standard) {
+      firstEntryAttempt.current = true;
+      setProposal({
+        kind: "log",
+        date: day,
+        logDate: day,
+        sourceLabel: "Standard food reference · estimated",
+        foods: [standard],
+        days: [],
+      });
+    } else if (ai) {
+      firstEntryAttempt.current = true;
+      ask(state.pending);
+    }
+  }, [state.profile, state.pending, state.chat.length, ai, screen, day]);
   const estimateEntry = () => {
     if (!food.name.trim() || busy) return;
     const description = [food.name.trim(), food.portion.trim()]
@@ -1106,7 +1155,7 @@ export default function App() {
       });
     } else {
       ask(
-        `I ate ${description}. Please estimate calories, protein and fibre with visible portion/preparation assumptions.`,
+        `${/^i (?:ate|had|have eaten)\b/i.test(description) ? description : `I ate ${description}`}. Please estimate calories, protein and fibre with visible portion/preparation assumptions.`,
         "chat",
         undefined,
         { logDate, editId },
@@ -1277,6 +1326,96 @@ export default function App() {
     }
     setProposal(null);
   };
+  const homeMealCard = (meal: Meal) => {
+    const eaten = wasEaten(meal);
+    const dietaryError = conflict(meal, p!);
+    return (
+      <article
+        className={`today-meal-card ${nextMeal === meal ? "next-meal" : ""}`}
+        key={meal.slot}
+      >
+        <FoodIllustration name={meal.name} slot={meal.slot} />
+        <div className="today-meal-content">
+          <div className="meal-card-meta">
+            <span>{meal.slot}</span>
+            <span className={`meal-state ${eaten ? "eaten" : ""}`}>
+              {eaten
+                ? "Eaten"
+                : nextMeal === meal
+                  ? "Up next · planned"
+                  : "Planned"}
+            </span>
+          </div>
+          <h3>{meal.name}</h3>
+          <p>{meal.portion}</p>
+          <small>~{meal.calories} kcal · food illustration</small>
+          {dietaryError && (
+            <p className="notice">
+              {dietaryError}. Update this meal before using it.
+            </p>
+          )}
+          <div className="today-meal-actions">
+            <button
+              className="primary"
+              disabled={eaten || !!dietaryError}
+              onClick={() => {
+                setError("");
+                setProposal({
+                  kind: "log",
+                  date: day,
+                  logDate: day,
+                  sourceLabel: `Your approved ${weekday} ${meal.slot}`,
+                  foods: [
+                    {
+                      name: meal.name,
+                      portion: meal.portion,
+                      calories: meal.calories,
+                      protein: meal.protein ?? null,
+                      fibre: meal.fibre ?? null,
+                      assumptions: meal.assumptions,
+                      menuDay: weekday,
+                      menuSlot: meal.slot,
+                    },
+                  ],
+                  days: [],
+                });
+                setScreen("home");
+              }}
+            >
+              {eaten ? (
+                <>
+                  <Check size={16} /> Logged
+                </>
+              ) : (
+                "I ate this"
+              )}
+            </button>
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => {
+                setOpenDay(weekday);
+                setScreen("menu");
+                const meals =
+                  (state.draft.length ? state.draft : state.plan).find(
+                    (d) => d.day === weekday,
+                  )?.meals || [];
+                const index = meals.findIndex((m) => m.slot === meal.slot);
+                if (index >= 0)
+                  ask(
+                    `Swap ${weekday} ${meal.slot}. Return a complete revised seven-day draft, preserving other meals and all exclusions.`,
+                    "menu",
+                    { day: weekday, index },
+                  );
+              }}
+            >
+              Swap
+            </button>
+          </div>
+        </div>
+      </article>
+    );
+  };
   const mealCard = (m: Meal, d: string, i: number, draft: boolean) => (
     <div className="meal" key={m.slot}>
       <div className="meal-heading">
@@ -1442,6 +1581,17 @@ export default function App() {
         </div>
       </main>
     );
+  if (screen === "onboarding" && !p && !advancedSetup)
+    return (
+      <main className="app">
+        <QuickSetup
+          profile={{ ...initialProfile, language }}
+          onSave={saveProfile}
+          onBack={() => setScreen("welcome")}
+          onAdvanced={() => setAdvancedSetup(true)}
+        />
+      </main>
+    );
   if (screen === "onboarding" || editing)
     return (
       <main className="app">
@@ -1486,16 +1636,27 @@ export default function App() {
           </p>
           <div className="daily-budget">
             <div>
-              <strong>{Math.max(0, t.remaining).toLocaleString()}</strong>
-              <h2>kcal left today</h2>
-              {t.remaining < 0 && (
+              <strong>
+                {(p?.budget
+                  ? Math.max(0, t.remaining)
+                  : t.eaten
+                ).toLocaleString()}
+              </strong>
+              <h2>{p?.budget ? "kcal left today" : "kcal logged today"}</h2>
+              {!!p?.budget && t.remaining < 0 && (
                 <p>{Math.abs(t.remaining)} kcal over budget</p>
               )}
             </div>
             <div className="budget-facts">
               <p>
-                <strong>{p?.budget.toLocaleString()} kcal</strong>
-                <span>daily budget</span>
+                <strong>
+                  {p?.budget
+                    ? `${p.budget.toLocaleString()} kcal`
+                    : "Your pace"}
+                </strong>
+                <span>
+                  {p?.budget ? "daily budget" : "no calorie target set"}
+                </span>
               </p>
               <p>
                 <strong>{t.eaten.toLocaleString()} kcal</strong>
@@ -1503,6 +1664,75 @@ export default function App() {
               </p>
             </div>
           </div>
+          <section className="today-menu" aria-label="Today’s menu">
+            <div className="food-log-heading">
+              <div>
+                <p className="eyebrow">A LITTLE LESS DECIDING</p>
+                <h2>On your plate today</h2>
+              </div>
+              <button
+                className="text-button"
+                onClick={() => {
+                  setOpenDay(weekday);
+                  setScreen("menu");
+                }}
+              >
+                View week
+              </button>
+            </div>
+            {!todayMeals.length ? (
+              <div className="card menu-invitation">
+                <FoodIllustration name="Dal and rice" slot="Lunch" />
+                <div>
+                  <h3>Your next meal, made easier.</h3>
+                  <p>
+                    Build a week around the food you enjoy. Review it before
+                    saving.
+                  </p>
+                  <button
+                    className="secondary"
+                    onClick={() => setScreen("menu")}
+                  >
+                    Plan my meals
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {nextMeal ? (
+                  homeMealCard(nextMeal)
+                ) : (
+                  <p className="notice">
+                    Today’s planned meals are logged. You can still chat or log
+                    something else.
+                  </p>
+                )}
+                {todayMeals.some((meal) => meal !== nextMeal) && (
+                  <details className="other-meals">
+                    <summary>
+                      Other meals today (
+                      {todayMeals.filter((meal) => meal !== nextMeal).length})
+                    </summary>
+                    {todayMeals
+                      .filter((meal) => meal !== nextMeal)
+                      .map(homeMealCard)}
+                  </details>
+                )}
+              </>
+            )}
+            <button
+              className="craving-invitation"
+              onClick={() => {
+                setScreen("home");
+                setText("I feel like eating something ");
+              }}
+            >
+              <span>Something else on your mind?</span>
+              <strong>
+                Explore a craving <ArrowUp size={16} />
+              </strong>
+            </button>
+          </section>
           <section
             className="calorie-panel dashboard-nutrients"
             aria-label="Consumed today"
@@ -1518,7 +1748,7 @@ export default function App() {
               label="Daily protein intake"
               title="Protein"
               value={t.protein.value}
-              target={p?.proteinTarget || 60}
+              target={p?.proteinTarget ?? 60}
               unit="g"
               unknown={t.protein.unknown}
             />
@@ -1526,7 +1756,7 @@ export default function App() {
               label="Daily fibre intake"
               title="Fibre"
               value={t.fibre.value}
-              target={p?.fibreTarget || 25}
+              target={p?.fibreTarget ?? 25}
               unit="g"
               unknown={t.fibre.unknown}
             />
@@ -1580,7 +1810,9 @@ export default function App() {
           <div className="home-heading log-heading">
             <div>
               <h1>What did you eat?</h1>
-              <p className="subtitle">Tell me the food and portion.</p>
+              <p className="subtitle">
+                Food, cravings, or figuring out what’s next.
+              </p>
             </div>
             <button className="secondary" onClick={() => setScreen("menu")}>
               Help me plan
@@ -1588,9 +1820,11 @@ export default function App() {
           </div>
           <div className="chat-budget">
             <span>
-              {t.remaining < 0
-                ? `${Math.abs(t.remaining).toLocaleString()} kcal over budget`
-                : `${t.remaining.toLocaleString()} kcal remaining`}
+              {!p?.budget
+                ? "Track today. Set a target whenever you’re ready."
+                : t.remaining < 0
+                  ? `${Math.abs(t.remaining).toLocaleString()} kcal over budget`
+                  : `${t.remaining.toLocaleString()} kcal remaining`}
             </span>
             <button
               className="text-button"
@@ -1603,32 +1837,37 @@ export default function App() {
               Food log
             </button>
           </div>
-          {state.pending && (
-            <div className="card pending">
-              <strong>Your first entry is still here.</strong>
-              <p>{state.pending}</p>
-              <small>
-                Nothing counted yet. Confirm a portion and estimate first.
-              </small>
-              <div className="actions">
-                <button
-                  className="secondary"
-                  onClick={() =>
-                    ask(
-                      /^[iI] (ate|had|have eaten|just ate)\b/.test(
-                        state.pending,
+          {state.pending &&
+            !proposal &&
+            !busy &&
+            !state.chat.some(
+              (turn) => turn.role === "user" && turn.text === state.pending,
+            ) && (
+              <div className="card pending">
+                <strong>Your first entry is still here.</strong>
+                <p>{state.pending}</p>
+                <small>
+                  Nothing counted yet. Confirm a portion and estimate first.
+                </small>
+                <div className="actions">
+                  <button
+                    className="secondary"
+                    onClick={() =>
+                      ask(
+                        /^[iI] (ate|had|have eaten|just ate)\b/.test(
+                          state.pending,
+                        )
+                          ? state.pending
+                          : `I ate ${state.pending}`,
                       )
-                        ? state.pending
-                        : `I ate ${state.pending}`,
-                    )
-                  }
-                >
-                  Estimate with AI
-                </button>
-                <button onClick={() => showManual()}>Enter manually</button>
+                    }
+                  >
+                    Estimate with AI
+                  </button>
+                  <button onClick={() => showManual()}>Enter manually</button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
           <section className="chat" aria-label="Conversation">
             {!state.chat.length && (
               <div className="chat-line">
@@ -1654,7 +1893,12 @@ export default function App() {
             ))}
             {busy && (
               <p className="thinking" role="status">
-                Thinking…
+                Thinking with you
+                <span className="thinking-dots" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
               </p>
             )}
             <div ref={chatEnd} />
@@ -1895,7 +2139,7 @@ export default function App() {
           )}
           {undo && (
             <p className="notice">
-              Ledger updated.{" "}
+              Food logged.{" "}
               <button
                 onClick={() => {
                   update({ foods: undo });
@@ -1930,11 +2174,36 @@ export default function App() {
           <p className="subtitle">A plan you get a say in.</p>
           <div className="menu-summary">
             <span>{p?.meals} meals / day</span>
-            <span>{p?.budget.toLocaleString()} kcal budget</span>
+            <span>
+              {p?.budget
+                ? `${p.budget.toLocaleString()} kcal budget`
+                : "Choose a calorie target"}
+            </span>
           </div>
+          {(menuSettings || !p?.budget) && (
+            <MenuBasics
+              profile={p!}
+              onCancel={p?.budget ? () => setMenuSettings(false) : undefined}
+              onSave={(next) => {
+                update({
+                  profile: next,
+                  draft: next.meals !== p?.meals ? [] : state.draft,
+                });
+                setMenuSettings(false);
+              }}
+            />
+          )}
+          {!!p?.budget && (
+            <button
+              className="text-button"
+              onClick={() => setMenuSettings(!menuSettings)}
+            >
+              Edit menu settings
+            </button>
+          )}
           <button
             className="primary"
-            disabled={busy}
+            disabled={busy || !p?.budget}
             onClick={() =>
               ask(
                 `Generate a complete seven-day draft menu with ${p?.meals} meals per day, respecting all preferences, dislikes and allergies, around ${p?.budget} kcal/day. Include oil and visible nutrition assumptions.`,
@@ -2126,9 +2395,9 @@ export default function App() {
           <h3 className="section-label">YOUR BASICS</h3>
           <div className="settings-card">
             {[
-              ["Height", `${p?.height} cm`],
-              ["Weight", `${p?.weight} kg`],
-              ["Activity level", p?.activity],
+              ["Height", p?.height ? `${p.height} cm` : "Not set"],
+              ["Weight", p?.weight ? `${p.weight} kg` : "Not set"],
+              ["Activity level", p?.activity || "Not set"],
             ].map(([k, v]) => (
               <button
                 key={k}
@@ -2143,9 +2412,12 @@ export default function App() {
           <h3 className="section-label">GOALS & FOOD</h3>
           <div className="settings-card">
             {[
-              ["Your goal", p?.goal],
+              ["Your goal", p?.goal || "Not set"],
               ["Meals per day", `${p?.meals} meals`],
-              ["Daily calorie budget", `${p?.budget} kcal`],
+              [
+                "Daily calorie budget",
+                p?.budget ? `${p.budget} kcal` : "Set a target",
+              ],
               ["Diet", p ? dietFor(p) || "Choose your diet" : ""],
               ["Food preferences", p?.preferences || "Add preferences"],
               ["Dislikes", p?.dislikes || "None"],

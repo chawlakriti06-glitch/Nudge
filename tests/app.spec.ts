@@ -66,13 +66,17 @@ test("manual onboarding retains welcome food, confirms once, reloads, edits and 
   await page.getByRole("button", { name: "Let’s get started" }).click();
   await page.getByLabel("Message", { exact: true }).fill("I ate 2 samosas");
   await page.getByRole("button", { name: "Send message" }).click();
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: "No known allergies — None" }).click();
+  await page
+    .getByText("Add a calorie target (optional)", { exact: true })
+    .click();
   await page
     .getByLabel("Dietary preference", { exact: true })
     .selectOption("vegetarian");
   await page.getByLabel("Daily calorie budget (kcal)").fill("1800");
-  await page.getByRole("button", { name: "Finish setup", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Start using Nudge", exact: true })
+    .click();
   await expect(
     page.getByText("I ate 2 samosas", { exact: true }),
   ).toBeVisible();
@@ -113,6 +117,9 @@ test("adult estimate path shows assumptions and needs acceptance", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Let’s get started" }).click();
   await page.getByRole("button", { name: "Set up my menu first" }).click();
+  await page
+    .getByRole("button", { name: "Set up with measurements instead" })
+    .click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: "Help me estimate" }).click();
   await page.getByLabel("Age", { exact: true }).fill("30");
@@ -397,6 +404,9 @@ test("measurements can be cleared and retyped without forced zero", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Let’s get started" }).click();
   await page.getByRole("button", { name: "Set up my menu first" }).click();
+  await page
+    .getByRole("button", { name: "Set up with measurements instead" })
+    .click();
   for (const [label, value] of [
     ["Height (cm)", "170"],
     ["Weight (kg)", "65.5"],
@@ -608,6 +618,7 @@ test("Swap previews an alternative beside the meal and preserves other meals and
     .getByRole("button", { name: "Log food", exact: true })
     .click();
   await page.getByRole("button", { name: "Menu", exact: true }).click();
+  await page.locator(".day-card").first().locator(".day-toggle").click();
   await page.route("**/api/chat", async (r) => {
     const plan = r.request().postDataJSON().context.plan;
     plan[0].meals[1] = {
@@ -1726,4 +1737,184 @@ test("craving choices use the remaining budget and choosing one does not change 
   expect(state.foods).toHaveLength(1);
   expect(state.plan).toEqual([]);
   expect(state.draft).toEqual([]);
+});
+
+test("quick onboarding skips measurements and supports logging with no hidden calorie target", async ({
+  page,
+}) => {
+  await page.route("**/api/status", (route) =>
+    route.fulfill({ json: { configured: true } }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Let’s get started" }).click();
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("I ate 2 eggs");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page
+    .getByRole("combobox", { name: "Dietary preference", exact: true })
+    .selectOption("eggetarian");
+  await page.getByRole("button", { name: "No known allergies — None" }).click();
+  await expect(page.getByLabel("Height (cm)", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Start using Nudge" }).click();
+  const stored = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(stored.profile.budget).toBe(0);
+  expect(stored.profile.height).toBe(0);
+  expect(stored.pending).toBe("I ate 2 eggs");
+  await page
+    .getByRole("button", { name: "Confirm & log", exact: true })
+    .click();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Home", exact: true })
+    .click();
+  await expect(
+    page.getByText("kcal logged today", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("no calorie target set", { exact: true }),
+  ).toBeVisible();
+  await page.route("**/api/chat", (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.context.remaining).toBeNull();
+    expect(body.context.eaten).toBe(156);
+    return route.fulfill({
+      json: {
+        message:
+          "Here are some dessert ideas with estimated portions. You haven’t set a target yet.",
+        kind: "message",
+        foods: [],
+        days: [],
+      },
+    });
+  });
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Log food", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("I feel like something sweet");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(
+    page.getByText("Here are some dessert ideas", { exact: false }),
+  ).toBeVisible();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Menu", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Create my weekly draft" }),
+  ).toBeDisabled();
+  await page
+    .getByLabel("Daily calorie budget (kcal)", { exact: true })
+    .fill("1800");
+  await page
+    .getByRole("combobox", { name: "Meals per day", exact: true })
+    .selectOption("4");
+  await page.getByRole("button", { name: "Save menu preferences" }).click();
+  await expect(
+    page.getByRole("button", { name: "Create my weekly draft" }),
+  ).toBeEnabled();
+  expect(
+    await page.evaluate(
+      () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods.length,
+    ),
+  ).toBe(1);
+});
+
+test("illustrated Home meals log their approved portions once and respect reduced motion", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("nudge.local.v1")!);
+    const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
+      new Date().getDay()
+    ];
+    state.plan = [
+      {
+        day: weekday,
+        meals: [
+          {
+            slot: "Breakfast",
+            name: "Poha",
+            portion: "1 katori (150 g cooked)",
+            ingredients: ["rice flakes", "5 ml oil"],
+            calories: 310,
+            protein: 7,
+            fibre: 4,
+            assumptions: "Includes 5 ml oil",
+            approved: true,
+          },
+          {
+            slot: "Lunch",
+            name: "Rajma rice",
+            portion: "1 bowl",
+            ingredients: ["rice", "rajma"],
+            calories: 450,
+            protein: 15,
+            fibre: 9,
+            assumptions: "Estimate",
+            approved: true,
+          },
+        ],
+      },
+    ];
+    localStorage.setItem("nudge.local.v1", JSON.stringify(state));
+  });
+  await page.reload();
+  const card = page.locator(".today-meal-card").first();
+  await expect(card.getByRole("img")).toBeVisible();
+  await expect(card).toContainText("Up next · planned");
+  await card.getByRole("button", { name: "I ate this" }).click();
+  await expect(
+    page.getByRole("button", { name: "Confirm & log" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => JSON.parse(localStorage.getItem("nudge.local.v1")!).foods.length,
+    ),
+  ).toBe(0);
+  await page.getByRole("button", { name: "Confirm & log" }).click();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Home", exact: true })
+    .click();
+  await page.getByText("Other meals today (1)", { exact: true }).click();
+  await expect(
+    page.locator(".today-meal-card").filter({ hasText: "Poha" }),
+  ).toContainText("Eaten");
+  await expect(
+    page
+      .locator(".today-meal-card")
+      .filter({ hasText: "Poha" })
+      .getByRole("button", { name: "Logged" }),
+  ).toBeDisabled();
+  await expect(
+    page.locator(".today-meal-card").filter({ hasText: "Rajma rice" }),
+  ).toContainText("Up next · planned");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await card.evaluate((el) => getComputedStyle(el).animationName)).toBe(
+    "none",
+  );
+  await page.setViewportSize({ width: 320, height: 568 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const state = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("nudge.local.v1")!),
+  );
+  expect(state.foods).toHaveLength(1);
+  expect(state.foods[0]).toMatchObject({
+    calories: 310,
+    protein: 7,
+    fibre: 4,
+    menuSlot: "Breakfast",
+  });
+  expect(state.plan[0].meals[0].approved).toBe(true);
 });

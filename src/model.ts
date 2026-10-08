@@ -49,7 +49,14 @@ export function approvedMenu(plan: Day[], draft: Day[]): Day[] {
       for (const source of [plan, draft])
         for (const meal of source.find((d) => d.day === day)?.meals || [])
           if (meal.approved) meals.set(meal.slot, meal);
-      return { day, meals: [...meals.values()] };
+      return {
+        day,
+        meals: [...meals.values()].sort(
+          (a, b) =>
+            ["Breakfast", "Lunch", "Snacks", "Dinner"].indexOf(a.slot) -
+            ["Breakfast", "Lunch", "Snacks", "Dinner"].indexOf(b.slot),
+        ),
+      };
     })
     .filter((d) => d.meals.length);
 }

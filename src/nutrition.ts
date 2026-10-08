@@ -4,7 +4,11 @@ import type { Food } from "./model";
 export function referenceEstimate(
   description: string,
 ): Omit<Food, "id" | "date"> | null {
-  const text = description.trim().toLowerCase().replace(/[.!]$/, "");
+  const text = description
+    .trim()
+    .toLowerCase()
+    .replace(/^i (?:ate|had|have eaten)\s+/, "")
+    .replace(/[.!]$/, "");
   let match = text.match(
     /^(\d+(?:\.\d+)?)\s*(?:large\s+)?(?:boiled\s+)?eggs?(?:\s*\(boiled\))?$/,
   );

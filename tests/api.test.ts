@@ -1682,3 +1682,27 @@ test.each(["unapproved", "already logged"])(
     expect((await response.json()).foods).toEqual([]);
   },
 );
+
+test("weekly planning without a chosen target asks for setup without calling Gemini or returning an error", async () => {
+  let calls = 0;
+  const response = await handleApi(
+    request({
+      operation: "chat",
+      message: "Generate a weekly menu",
+      context: { profile: { meals: 4, budget: 0 } },
+    }),
+    { NUDGE_GEMINI_API_KEY: "test" },
+    async () => {
+      calls++;
+      throw Error("Provider should not be called");
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(calls).toBe(0);
+  expect(await response.json()).toMatchObject({
+    kind: "message",
+    foods: [],
+    days: [],
+    message: expect.stringContaining("Choose your calorie target"),
+  });
+});

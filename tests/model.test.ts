@@ -228,5 +228,5 @@ it("approved draft meals are available alongside saved meals without leaking una
       },
     ],
   );
-  expect(result[0].meals.map((m) => m.name)).toEqual(["Idli", "Dal", "Rajma"]);
+  expect(result[0].meals.map((m) => m.name)).toEqual(["Idli", "Rajma", "Dal"]);
 });

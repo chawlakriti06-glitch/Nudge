@@ -307,11 +307,13 @@ test.each([3, 4])(
         expect(schema.properties.kind.enum).toEqual(["plan"]);
         for (const day of days) {
           expect(
-            schema.properties.days.properties[day].properties.meals.minItems,
-          ).toBe(count);
-          expect(
-            schema.properties.days.properties[day].properties.day.enum,
-          ).toEqual([day]);
+            schema.properties.days.properties[day].properties.meals.required,
+          ).toEqual(slots);
+          for (const slot of slots)
+            expect(
+              schema.properties.days.properties[day].properties.meals
+                .properties[slot].properties,
+            ).not.toHaveProperty("slot");
         }
         const plan = {
           message: "Fixture",
@@ -322,14 +324,18 @@ test.each([3, 4])(
               day,
               {
                 day: "Mon", // Named keys are authoritative, even if nested labels repeat.
-                meals: slots.map((slot) => ({
-                  slot,
-                  name: "Meal",
-                  portion: "1 bowl",
-                  ingredients: ["rice"],
-                  calories: 300,
-                  assumptions: "Fixture",
-                })),
+                meals: Object.fromEntries(
+                  slots.map((slot) => [
+                    slot,
+                    {
+                      name: "Meal",
+                      portion: "1 bowl",
+                      ingredients: ["rice"],
+                      calories: 300,
+                      assumptions: "Fixture",
+                    },
+                  ]),
+                ),
               },
             ]),
           ),
@@ -347,6 +353,8 @@ test.each([3, 4])(
     const plan = await r.json();
     expect(plan.days.map((d: any) => d.day)).toEqual(days);
     expect(plan.days.every((d: any) => d.meals.length === count)).toBe(true);
+    for (const day of plan.days)
+      expect(day.meals.map((meal: any) => meal.slot)).toEqual(slots);
   },
 );
 test("a meal label gets one real provider correction, not a fabricated assistant answer", async () => {

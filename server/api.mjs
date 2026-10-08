@@ -139,9 +139,17 @@ export async function handleApi(
     responseSchema.properties.days = object(
       Object.fromEntries(
         weekDays.map((day) => {
-          const definition = structuredClone(daySchema);
-          definition.properties.day.enum = [day];
-          return [day, definition];
+          const namedMeals = Object.fromEntries(
+            mealSlots.map((slot) => {
+              const details = structuredClone(meal);
+              delete details.properties.slot;
+              details.required = details.required.filter(
+                (key) => key !== "slot",
+              );
+              return [slot, details];
+            }),
+          );
+          return [day, object({ meals: object(namedMeals) })];
         }),
       ),
     );
@@ -152,7 +160,7 @@ export async function handleApi(
   );
   if (intakeRequest) responseSchema.properties.kind.enum = ["message", "log"];
   const portionRules = `Respond to the actual food question, never with just a meal label such as Breakfast. For consumption requests, ask a concise question about missing quantities/preparation with kind message and empty foods/days. For eggs and bread without quantities, ask how many eggs and bread slices, and how the eggs were cooked or whether butter/oil was added. Use earlier conversation to interpret answers such as '2 eggs and 1 slice'. Once portions are clear, return kind log with a preview of estimated nutrition; never save it. Do not guess an unspecified portion. A meal name alone is not an answer. ${repairAttempt ? "Your prior response was only a meal label. Correct it by asking the needed portion question or supplying a log preview if quantities are known." : ""}`;
-  const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun. Actual consumed food does not replace a planned meal slot.`;
+  const menuRules = `Current user requires exactly ${count} meals on EVERY day. Required slots, in order: ${mealSlots.join(", ")}. A plan must include all seven day codes: ${weekDays.join(", ")}. Do not omit or combine any slot, even when negotiating a single meal. Return the complete revised week. When the schema uses named day properties, populate EVERY required property Mon through Sun, and every named meal property inside each day. Meal keys define the slots; do not output a meals array for this schema. Actual consumed food does not replace a planned meal slot.`;
   try {
     if (!/^gemini-[a-z0-9.-]+$/i.test(model))
       return json(503, {
@@ -247,6 +255,19 @@ export async function handleApi(
           error:
             "Gemini omitted a required day. Your saved plan is unchanged; retry the complete draft.",
         });
+      for (const day of weekDays) {
+        const meals = parsed.days[day]?.meals;
+        if (meals && !Array.isArray(meals) && typeof meals === "object") {
+          if (!mealSlots.every((slot) => Object.hasOwn(meals, slot)))
+            return json(502, {
+              error: `Gemini omitted a required meal for ${day}. Your saved plan is unchanged.`,
+            });
+          parsed.days[day].meals = mealSlots.map((slot) => ({
+            ...meals[slot],
+            slot,
+          }));
+        }
+      }
       parsed.days = weekDays.map((day) => ({ ...parsed.days[day], day }));
     }
     if (
